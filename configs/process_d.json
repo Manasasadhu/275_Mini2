@@ -1,0 +1,19 @@
+{
+  "process_id": "D",
+  "role": "worker",
+  "listen_host": "0.0.0.0",
+  "listen_port": 50054,
+  "data_path": "/Users/Asha/Downloads/dob_permits copy.csv",
+  "team": "blue",
+  "is_team_leader": false,
+  "edges": [],
+  "data_partitioning": {
+    "strategy": "borough",
+    "owned_boroughs": ["BRONX"]
+  },
+  "chunk_config": {
+    "default_chunk_size": 500,
+    "max_chunk_size": 2000,
+    "min_chunk_size": 100
+  }
+}

@@ -1,0 +1,128 @@
+syntax = "proto3";
+option optimize_for = SPEED;
+package dobpermit;
+
+// DOB Permit Issuance query and response service with chunked streaming support
+service DobPermitService {
+    // Client-initiated query with server-side streaming response
+    rpc QueryPermits(QueryRequest) returns (stream QueryResponse) {}
+
+    // Health check for process availability
+    rpc HealthCheck(HealthRequest) returns (HealthResponse) {}
+
+    // Internal delegation between processes (leader to team leaders)
+    rpc DelegateQuery(DelegationRequest) returns (stream DelegationResponse) {}
+
+    // Request cancellation
+    rpc CancelQuery(CancelRequest) returns (CancelResponse) {}
+}
+
+// Query request from client to leader (process A)
+message QueryRequest {
+    string request_id       = 1;
+    string borough          = 2;   // MANHATTAN, BROOKLYN, QUEENS, BRONX, STATEN ISLAND, or empty for all
+    string filing_date_start = 3;  // MM/DD/YYYY
+    string filing_date_end   = 4;  // MM/DD/YYYY
+    string permit_type      = 5;   // EQ, EW, MH, NB, etc. or empty for all
+    string job_type         = 6;   // A1, A2, A3, NB, etc. or empty for all
+    int32  max_records      = 7;   // 0 = no limit
+    int32  chunk_size       = 8;   // Records per chunk
+}
+
+// Individual DOB permit record with realistic field types
+message PermitRecord {
+    string borough              = 1;
+    int32  bin_number           = 2;
+    string house_number         = 3;
+    string street_name          = 4;
+    int64  job_number           = 5;
+    int32  job_doc_number       = 6;
+    string job_type             = 7;   // A1, A2, A3, NB, DM
+    bool   self_cert            = 8;
+    string block                = 9;
+    string lot                  = 10;
+    int32  community_board      = 11;
+    string zip_code             = 12;
+    int32  bldg_type            = 13;
+    bool   residential          = 14;
+    string work_type            = 15;
+    string permit_status        = 16;  // ISSUED, RENEWED, etc.
+    string filing_status        = 17;  // INITIAL, RENEWAL
+    string permit_type          = 18;  // EQ, EW, MH, NB, etc.
+    int32  permit_sequence      = 19;
+    string permit_subtype       = 20;
+    string filing_date          = 21;  // MM/DD/YYYY
+    string issuance_date        = 22;
+    string expiration_date      = 23;
+    string job_start_date       = 24;
+    string permittee_first_name = 25;
+    string permittee_last_name  = 26;
+    string permittee_business   = 27;
+    string permittee_phone      = 28;
+    string permittee_license_type = 29;
+    string permittee_license_num  = 30;
+    string owner_business_name  = 31;
+    string owner_first_name     = 32;
+    string owner_last_name      = 33;
+    bool   non_profit           = 34;
+    string dob_run_date         = 35;
+    int64  permit_si_no         = 36;
+    double latitude             = 37;
+    double longitude            = 38;
+    int32  council_district     = 39;
+    string census_tract         = 40;
+    string nta_name             = 41;
+}
+
+// Chunked response from leader to client
+message QueryResponse {
+    string request_id       = 1;
+    int32  chunk_number     = 2;   // 0-indexed
+    int32  total_chunks     = 3;   // -1 if unknown; set in final chunk
+    repeated PermitRecord records = 4;
+    bool   is_final         = 5;
+    int32  total_records    = 6;   // Populated in final chunk
+    string source_process   = 7;   // Which process generated this chunk
+    int64  processing_time_ms = 8;
+}
+
+// Internal delegation: leader -> team leader
+message DelegationRequest {
+    string request_id           = 1;
+    bytes  original_query       = 2;   // Serialized QueryRequest
+    string delegating_process   = 3;
+    repeated string target_boroughs = 4; // Boroughs this node should handle
+}
+
+// Response from team leader / worker back up
+message DelegationResponse {
+    string request_id           = 1;
+    int32  chunk_number         = 2;
+    repeated PermitRecord records = 3;
+    bool   is_final             = 4;
+    string responding_process   = 5;
+}
+
+// Health check
+message HealthRequest {
+    string requesting_process = 1;
+}
+
+message HealthResponse {
+    string responding_process = 1;
+    bool   is_healthy         = 2;
+    int32  pending_requests   = 3;
+    int32  active_workers     = 4;
+}
+
+// Cancellation
+message CancelRequest {
+    string request_id         = 1;
+    string requesting_process = 2;
+}
+
+message CancelResponse {
+    string request_id = 1;
+    bool   cancelled  = 2;
+    string message    = 3;
+}
