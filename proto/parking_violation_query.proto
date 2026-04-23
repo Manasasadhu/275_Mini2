@@ -1,0 +1,130 @@
+syntax = "proto3";
+option optimize_for = SPEED;
+package parkingviolation;
+
+// NYC Parking Violations query and response service with chunked streaming support
+service ParkingViolationService {
+    // Client-initiated query with server-side streaming response
+    rpc QueryViolations(QueryRequest) returns (stream QueryResponse) {}
+
+    // Health check for process availability
+    rpc HealthCheck(HealthRequest) returns (HealthResponse) {}
+
+    // Internal delegation between processes (leader to team leaders / workers)
+    rpc DelegateQuery(DelegationRequest) returns (stream DelegationResponse) {}
+
+    // Request cancellation
+    rpc CancelQuery(CancelRequest) returns (CancelResponse) {}
+}
+
+// Query request from client to leader (process A)
+message QueryRequest {
+    string request_id            = 1;
+    string violation_county      = 2;   // NY/MN, BK/K/Kings, QN/Q, BX, ST — empty = all
+    int32  violation_code        = 3;   // 0 = all codes
+    string issue_date_start      = 4;   // MM/DD/YYYY
+    string issue_date_end        = 5;   // MM/DD/YYYY
+    string issuing_agency        = 6;   // T, P, V, etc. — empty = all
+    int32  max_records           = 7;   // 0 = no limit
+    int32  chunk_size            = 8;   // records per chunk
+}
+
+// Individual parking violation record with realistic field types
+message ViolationRecord {
+    int64  summons_number           = 1;
+    string plate_id                 = 2;
+    string registration_state       = 3;
+    string plate_type               = 4;
+    string issue_date               = 5;   // MM/DD/YYYY
+    int32  violation_code           = 6;
+    string vehicle_body_type        = 7;
+    string vehicle_make             = 8;
+    string issuing_agency           = 9;
+    int32  street_code1             = 10;
+    int32  street_code2             = 11;
+    int32  street_code3             = 12;
+    string vehicle_expiration_date  = 13;  // YYYYMMDD
+    string violation_location       = 14;
+    int32  violation_precinct       = 15;
+    int32  issuer_precinct          = 16;
+    int32  issuer_code              = 17;
+    string issuer_command           = 18;
+    string issuer_squad             = 19;
+    string violation_time           = 20;  // e.g. "0209P"
+    string time_first_observed      = 21;
+    string violation_county         = 22;  // partition key
+    string violation_front_opposite = 23;
+    string house_number             = 24;
+    string street_name              = 25;
+    string intersecting_street      = 26;
+    string date_first_observed      = 27;
+    int32  law_section              = 28;
+    string sub_division             = 29;
+    string violation_legal_code     = 30;
+    string days_parking_in_effect   = 31;
+    string from_hours_in_effect     = 32;
+    string to_hours_in_effect       = 33;
+    string vehicle_color            = 34;
+    bool   unregistered_vehicle     = 35;
+    int32  vehicle_year             = 36;
+    string meter_number             = 37;
+    int32  feet_from_curb           = 38;
+    string violation_post_code      = 39;
+    string violation_description    = 40;
+    string no_standing_violation    = 41;
+    string hydrant_violation        = 42;
+    string double_parking_violation = 43;
+}
+
+// Chunked response from leader to client
+message QueryResponse {
+    string request_id         = 1;
+    int32  chunk_number       = 2;   // 0-indexed
+    int32  total_chunks       = 3;   // -1 if unknown; set in final chunk
+    repeated ViolationRecord records = 4;
+    bool   is_final           = 5;
+    int32  total_records      = 6;   // populated in final chunk
+    string source_process     = 7;   // which process generated this chunk
+    int64  processing_time_ms = 8;
+}
+
+// Internal delegation: leader -> team leader / worker
+message DelegationRequest {
+    string request_id              = 1;
+    bytes  original_query          = 2;   // serialized QueryRequest
+    string delegating_process      = 3;
+    repeated string target_counties = 4;  // county codes this node should handle
+}
+
+// Response from team leader / worker back up the chain
+message DelegationResponse {
+    string request_id            = 1;
+    int32  chunk_number          = 2;
+    repeated ViolationRecord records = 3;
+    bool   is_final              = 4;
+    string responding_process    = 5;
+}
+
+// Health check
+message HealthRequest {
+    string requesting_process = 1;
+}
+
+message HealthResponse {
+    string responding_process = 1;
+    bool   is_healthy         = 2;
+    int32  pending_requests   = 3;
+    int32  active_workers     = 4;
+}
+
+// Cancellation
+message CancelRequest {
+    string request_id         = 1;
+    string requesting_process = 2;
+}
+
+message CancelResponse {
+    string request_id = 1;
+    bool   cancelled  = 2;
+    string message    = 3;
+}
