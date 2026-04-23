@@ -1,0 +1,19 @@
+{
+  "process_id": "F",
+  "role": "worker",
+  "listen_host": "0.0.0.0",
+  "listen_port": 50056,
+  "data_path": "/Users/Asha/Desktop/SJSU/secondsem/275/mini2/dataset/parking_violations_2025.csv",
+  "team": "yellow",
+  "is_team_leader": false,
+  "edges": [],
+  "data_partitioning": {
+    "strategy": "county",
+    "owned_counties": ["BK", "K", "Kings"]
+  },
+  "chunk_config": {
+    "default_chunk_size": 500,
+    "max_chunk_size": 2000,
+    "min_chunk_size": 100
+  }
+}

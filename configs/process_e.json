@@ -1,0 +1,41 @@
+{
+  "process_id": "E",
+  "role": "team_leader",
+  "listen_host": "0.0.0.0",
+  "listen_port": 50055,
+  "data_path": "/Users/Asha/Desktop/SJSU/secondsem/275/mini2/dataset/parking_violations_2025.csv",
+  "team": "yellow",
+  "is_team_leader": true,
+  "edges": [
+    {
+      "to": "F",
+      "host": "localhost",
+      "port": 50056,
+      "relationship": "worker",
+      "team": "yellow"
+    },
+    {
+      "to": "D",
+      "host": "localhost",
+      "port": 50054,
+      "relationship": "worker",
+      "team": "blue"
+    },
+    {
+      "to": "G",
+      "host": "localhost",
+      "port": 50057,
+      "relationship": "worker",
+      "team": "yellow"
+    }
+  ],
+  "data_partitioning": {
+    "strategy": "county",
+    "owned_counties": []
+  },
+  "chunk_config": {
+    "default_chunk_size": 500,
+    "max_chunk_size": 2000,
+    "min_chunk_size": 100
+  }
+}
