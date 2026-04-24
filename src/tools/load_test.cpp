@@ -17,6 +17,8 @@
 
 #include "../common/parking_violations_loader.hpp"
 
+static const char* kDefaultCsvPath = "/Users/aravindreddy/Downloads/SJSU ClassWork/275 EAD/275_Mini2_Dataset/parking_violations_combined.csv";
+
 static void printRecord(const ParkingViolationRecord& r) {
     std::cout
         << "  summons="     << r.summons_number
@@ -34,13 +36,7 @@ static void printRecord(const ParkingViolationRecord& r) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0]
-                  << " <csv_path> [county] [violation_code] [max_records]\n";
-        return 1;
-    }
-
-    std::string csv_path        = argv[1];
+    std::string csv_path        = (argc >= 2) ? argv[1] : kDefaultCsvPath;
     std::string county          = (argc >= 3) ? argv[2] : "";
     int32_t     violation_code  = (argc >= 4) ? std::stoi(argv[3]) : 0;
     int         max_records     = (argc >= 5) ? std::stoi(argv[4]) : 0;

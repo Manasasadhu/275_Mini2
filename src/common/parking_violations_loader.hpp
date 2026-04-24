@@ -135,6 +135,7 @@ public:
             throw std::runtime_error("Failed to open CSV: " + csv_path_);
         }
 
+        constexpr int kProgressInterval = 500000;
         std::vector<ParkingViolationRecord> results;
         std::string line;
 
@@ -148,6 +149,13 @@ public:
         while (std::getline(file, line)) {
             ++line_num;
             if (line.empty()) continue;
+
+            const int processed_rows = line_num - 1;
+            if (processed_rows % kProgressInterval == 0) {
+                std::cout << "Processed " << processed_rows
+                          << " rows, matched " << results.size()
+                          << " records so far\n";
+            }
 
             if (max_records > 0 && static_cast<int>(results.size()) >= max_records) break;
 
