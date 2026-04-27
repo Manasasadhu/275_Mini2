@@ -1,0 +1,4 @@
+/Users/Asha/Desktop/Asha workspace/275-mini2-DOB-Permit-Issuance/build/CMakeFiles/parking_violation_proto.dir
+/Users/Asha/Desktop/Asha workspace/275-mini2-DOB-Permit-Issuance/build/CMakeFiles/load_test.dir
+/Users/Asha/Desktop/Asha workspace/275-mini2-DOB-Permit-Issuance/build/CMakeFiles/edit_cache.dir
+/Users/Asha/Desktop/Asha workspace/275-mini2-DOB-Permit-Issuance/build/CMakeFiles/rebuild_cache.dir

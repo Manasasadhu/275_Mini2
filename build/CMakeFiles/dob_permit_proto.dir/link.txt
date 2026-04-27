@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdob_permit_proto.a CMakeFiles/dob_permit_proto.dir/generated/dob_permit_query.pb.cc.o CMakeFiles/dob_permit_proto.dir/generated/dob_permit_query.grpc.pb.cc.o
+/usr/bin/ranlib libdob_permit_proto.a

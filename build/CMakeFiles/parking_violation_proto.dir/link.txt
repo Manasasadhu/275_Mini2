@@ -1,0 +1,2 @@
+/usr/bin/ar qc libparking_violation_proto.a CMakeFiles/parking_violation_proto.dir/generated/parking_violation_query.pb.cc.o CMakeFiles/parking_violation_proto.dir/generated/parking_violation_query.grpc.pb.cc.o
+/usr/bin/ranlib libparking_violation_proto.a
