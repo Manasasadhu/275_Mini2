@@ -62,7 +62,7 @@ Overlay choices. There are two designs for you to choose from:
       * Team Yellow: C,E,F,G,I
 
       Notes: 1) You don't have to name your teams blue and yellow. This is just for 
-      discussion, 2) Teams can increase the depth by adding more servers, but they
+      discussion, 2) Teams ca increase the depth by adding more servers, but they
       cannot flatten the tree or simplify the edges.
       
    2. A 3x3 grid: Where edges are horizontal and vertical. E.g, AB, AD. Where AE 

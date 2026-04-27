@@ -2,52 +2,98 @@ syntax = "proto3";
 option optimize_for = SPEED;
 package parkingviolation;
 
-// NYC Parking Violations query and response service with chunked streaming support
 service ParkingViolationService {
-    // Client-initiated query with server-side streaming response
-    rpc QueryViolations(QueryRequest) returns (stream QueryResponse) {}
-
-    // Health check for process availability
-    rpc HealthCheck(HealthRequest) returns (HealthResponse) {}
-
-    // Internal delegation between processes (leader to team leaders / workers)
-    rpc DelegateQuery(DelegationRequest) returns (stream DelegationResponse) {}
-
-    // Request cancellation
+    rpc SubmitQuery(QueryRequest) returns (QueryResponse) {}
+    rpc ForwardQuery(ForwardRequest) returns (ForwardResponse) {}
     rpc CancelQuery(CancelRequest) returns (CancelResponse) {}
+    rpc HealthCheck(HealthRequest) returns (HealthResponse) {}
 }
 
-// Query request from client to leader (process A)
 message QueryRequest {
-    string request_id            = 1;
-    string violation_county      = 2;   // NY/MN, BK/K/Kings, QN/Q, BX, ST — empty = all
-    int32  violation_code        = 3;   // 0 = all codes
-    string issue_date_start      = 4;   // MM/DD/YYYY
-    string issue_date_end        = 5;   // MM/DD/YYYY
-    string issuing_agency        = 6;   // T, P, V, etc. — empty = all
-    int32  max_records           = 7;   // 0 = no limit
-    int32  chunk_size            = 8;   // records per chunk
+    string request_id = 1;
+    oneof query {
+        string plate_id = 2;
+        int32 violation_code = 3;
+        DateRange issue_date = 4;
+    }
+    int32 chunk_size = 5;  // records per chunk, e.g., 100
 }
 
-// Individual parking violation record with realistic field types
+message DateRange {
+    string start = 1;  // YYYY-MM-DD
+    string end = 2;    // YYYY-MM-DD
+}
+
+message QueryResponse {
+    repeated Chunk chunks = 1;
+}
+
+message Chunk {
+    string request_id = 1;
+    repeated ViolationRecord records = 2;
+    bool is_last = 3;
+}
+
+message ForwardRequest {
+    string request_id = 1;
+    string from_node = 2;
+    oneof query {
+        string plate_id = 3;
+        int32 violation_code = 4;
+        DateRange issue_date = 5;
+    }
+    int32 chunk_size = 6;
+}
+
+message ForwardResponse {
+    repeated Chunk chunks = 1;
+}
+
+message CancelRequest {
+    string request_id = 1;
+}
+
+message CancelResponse {
+    bool success = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+    bool healthy = 1;
+}
+
 message ViolationRecord {
-    int64  summons_number           = 1;
-    string plate_id                 = 2;
-    string registration_state       = 3;
-    string plate_type               = 4;
-    string issue_date               = 5;   // MM/DD/YYYY
-    int32  violation_code           = 6;
-    string vehicle_body_type        = 7;
-    string vehicle_make             = 8;
-    string issuing_agency           = 9;
-    int32  street_code1             = 10;
-    int32  street_code2             = 11;
-    int32  street_code3             = 12;
-    string vehicle_expiration_date  = 13;  // YYYYMMDD
-    string violation_location       = 14;
-    int32  violation_precinct       = 15;
-    int32  issuer_precinct          = 16;
-    int32  issuer_code              = 17;
+    int64 summons_number = 1;
+    string plate_id = 2;
+    string registration_state = 3;
+    string plate_type = 4;
+    string issue_date = 5;  // MM/DD/YYYY
+    int32 violation_code = 6;
+    string vehicle_body_type = 7;
+    string vehicle_make = 8;
+    string issuing_agency = 9;
+    int32 street_code1 = 10;
+    int32 street_code2 = 11;
+    int32 street_code3 = 12;
+    string vehicle_expiration_date = 13;  // YYYYMMDD
+    string violation_location = 14;
+    int32 violation_precinct = 15;
+    int32 issuer_precinct = 16;
+    int32 issuer_code = 17;
+    string violation_description = 18;
+    int32 fine_amount = 19;
+    string penalty_amount = 20;
+    string interest_amount = 21;
+    string reduction_amount = 22;
+    string payment_amount = 23;
+    string amount_due = 24;
+    string precinct = 25;
+    string county = 26;
+    string issuing_agency_name = 27;
+    string violation_status = 28;
+    string summons_image = 29;
+}
     string issuer_command           = 18;
     string issuer_squad             = 19;
     string violation_time           = 20;  // e.g. "0209P"
