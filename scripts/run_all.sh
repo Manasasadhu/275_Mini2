@@ -18,7 +18,7 @@ for node in A B C D E G; do
 done
 
 # Python nodes (F, H, I)
-for node in F H, I; do
+for node in F H I; do
     echo "Starting Python node $node..."
     python3 -u "$PYTHON_SERVER" -n "$node" -c "$CONFIG" > "$LOG_DIR/$node.log" 2>&1 &
     echo $! > "$LOG_DIR/$node.pid"

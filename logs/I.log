@@ -1,2 +1,3 @@
-Initialized neighbor A at localhost:50051
-Server listening on localhost:50059
+[I] Initialized neighbor A at localhost:50051
+[I] Server started on localhost:50059
+[I] Role: worker, Language: python

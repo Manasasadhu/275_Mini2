@@ -1,7 +1,7 @@
 {
   "global": {
     "default_chunk_size": 500,
-    "shared_data_file": "/Users/aravindreddy/Downloads/SJSU ClassWork/275 EAD/275_Mini2_Dataset/parking_violations_combined.csv",
+    "shared_data_file": "/Users/bhuvana/Desktop/CMPE275/mini2/combined_parking_violations.csv",
     "date_field": "Issue Date"
   },
   "nodes": {
