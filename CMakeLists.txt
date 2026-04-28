@@ -75,6 +75,37 @@ if(BUILD_GRPC_COMPONENTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# gRPC Server and Client (only if gRPC enabled)
+# ---------------------------------------------------------------------------
+if(BUILD_GRPC_COMPONENTS)
+    add_executable(server
+        src/server/server.cpp
+    )
+    target_include_directories(server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${PROTO_GENERATED_DIR})
+    target_link_libraries(server ${GRPC_LIBS})
+    add_dependencies(server parking_violation_proto)
+
+    add_executable(client
+        src/client/client.cpp
+    )
+    target_include_directories(client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${PROTO_GENERATED_DIR})
+    target_link_libraries(client ${GRPC_LIBS})
+    add_dependencies(client parking_violation_proto)
+
+    if(APPLE)
+        set_target_properties(server PROPERTIES
+            LINK_FLAGS "-Wl,-undefined,dynamic_lookup"
+        )
+        set_target_properties(client PROPERTIES
+            LINK_FLAGS "-Wl,-undefined,dynamic_lookup"
+        )
+    else()
+        target_link_libraries(server rt pthread)
+        target_link_libraries(client rt pthread)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # load_test  (standalone: no gRPC dependency, just the CSV loader)
 # ---------------------------------------------------------------------------
 add_executable(load_test
