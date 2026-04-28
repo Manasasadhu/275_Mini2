@@ -6,11 +6,14 @@ BUILD_DIR="build"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_GRPC_COMPONENTS=OFF
+cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_GRPC_COMPONENTS=ON
 
-# Build only load_test for now (no gRPC servers yet)
-make -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu) load_test
+# Build all targets: load_test, server, client
+make -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
 
 echo ""
 echo "Build complete."
-echo "Run the loader test:"
+echo "Executables available:"
+echo "  - build/load_test      (CSV loader test)"
+echo "  - build/src/server/server (C++ gRPC server)"
+echo "  - build/src/client/client (C++ gRPC client)"
