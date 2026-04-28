@@ -17,7 +17,7 @@
 
 #include "../common/parking_violations_loader.hpp"
 
-static const char* kDefaultCsvPath = "/Users/aravindreddy/Downloads/SJSU ClassWork/275 EAD/275_Mini2_Dataset/parking_violations_combined.csv";
+static const char* kDefaultCsvPath = "../combined_parking_violations.csv";
 
 static void printRecord(const ParkingViolationRecord& r) {
     std::cout

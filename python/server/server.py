@@ -4,7 +4,6 @@ import parking_violation_query_pb2
 import parking_violation_query_pb2_grpc
 import json
 import csv
-from datetime import datetime
 import argparse
 import sys
 
@@ -29,13 +28,10 @@ class Config:
         else:
             self.data_file = node_data['data_file']
         self.shard = node_data['shard']
+        self.neighbor_ports = {nid: nd['port'] for nid, nd in data['nodes'].items()}
 
     def get_neighbor_port(self, neighbor_id):
-        port_map = {
-            "A": 50051, "B": 50052, "C": 50053, "D": 50054, "E": 50055,
-            "F": 50056, "G": 50057, "H": 50058, "I": 50059
-        }
-        return port_map.get(neighbor_id, 50051)
+        return self.neighbor_ports.get(neighbor_id, 0)
 
 
 def _copy_query_to_forward(request, fwd_request):
@@ -53,14 +49,27 @@ def _copy_query_to_forward(request, fwd_request):
         fwd_request.unregistered_vehicle_lookup.CopyFrom(request.unregistered_vehicle_lookup)
 
 
-def _date_in_range(date_str, shard_start, shard_end):
+def _normalize_mdy(date_str):
+    """Convert MM/DD/YYYY to YYYYMMDD for fast lexicographic compare."""
+    s = date_str.strip()
+    if len(s) < 10:
+        return ""
     try:
-        dt = datetime.strptime(date_str.strip(), '%m/%d/%Y')
-        s = datetime.strptime(shard_start, '%Y-%m-%d')
-        e = datetime.strptime(shard_end, '%Y-%m-%d')
-        return s <= dt <= e
-    except (ValueError, AttributeError):
+        return s[6:10] + s[0:2] + s[3:5]
+    except (IndexError, TypeError):
+        return ""
+
+
+def _normalize_ymd(date_str):
+    """Convert YYYY-MM-DD to YYYYMMDD."""
+    return date_str[0:4] + date_str[5:7] + date_str[8:10]
+
+
+def _date_in_range(date_str, shard_start, shard_end):
+    d = _normalize_mdy(date_str)
+    if not d:
         return False
+    return _normalize_ymd(shard_start) <= d <= _normalize_ymd(shard_end)
 
 
 def _matches_query(row, request, date_field):
@@ -86,15 +95,12 @@ def _matches_query(row, request, date_field):
         except (ValueError, TypeError):
             return False
         if q.date_range.start or q.date_range.end:
-            try:
-                rd = datetime.strptime(row.get(date_field, '').strip(), '%m/%d/%Y')
-                if q.date_range.start:
-                    if rd < datetime.strptime(q.date_range.start, '%Y-%m-%d'):
-                        return False
-                if q.date_range.end:
-                    if rd > datetime.strptime(q.date_range.end, '%Y-%m-%d'):
-                        return False
-            except (ValueError, AttributeError):
+            d = _normalize_mdy(row.get(date_field, ''))
+            if not d:
+                return False
+            if q.date_range.start and d < _normalize_ymd(q.date_range.start):
+                return False
+            if q.date_range.end and d > _normalize_ymd(q.date_range.end):
                 return False
         return True
 

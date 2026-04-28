@@ -28,11 +28,9 @@ private:
     std::map<std::string, std::unique_ptr<parkingviolation::ParkingViolationService::Stub>> neighbor_stubs_;
 
     int get_neighbor_port(const std::string& neighbor_id) {
-        std::map<std::string, int> port_map = {
-            {"A", 50051}, {"B", 50052}, {"C", 50053}, {"D", 50054}, {"E", 50055},
-            {"F", 50056}, {"G", 50057}, {"H", 50058}, {"I", 50059}
-        };
-        return port_map[neighbor_id];
+        auto it = config_.neighbor_ports.find(neighbor_id);
+        if (it != config_.neighbor_ports.end()) return it->second;
+        return 0;
     }
 
     static void copy_query(const parkingviolation::QueryRequest* src,

@@ -2,3 +2,6 @@ build/
 *.csv
 .DS_Store
 logs/
+scripts/logs/
+*.pid
+__pycache__/

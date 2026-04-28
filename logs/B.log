@@ -3,10 +3,3 @@ Initialized neighbor C at localhost:50053
 Initialized neighbor D at localhost:50054
 Initialized neighbor E at localhost:50055
 Server listening on localhost:50052
-[B] ForwardQuery received: request_id=q1, from_node=A
-[B] Forwarding to neighbor C
-[B] Collected 1 chunks from C
-[B] Forwarding to neighbor D
-[B] Collected 1 chunks from D
-[B] Forwarding to neighbor E
-[B] Query q1 already processed, skipping

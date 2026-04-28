@@ -1,7 +1,7 @@
 {
   "global": {
     "default_chunk_size": 500,
-    "shared_data_file": "/Users/bhuvana/Desktop/CMPE275/mini2/combined_parking_violations.csv",
+    "shared_data_file": "../combined_parking_violations.csv",
     "date_field": "Issue Date"
   },
   "nodes": {

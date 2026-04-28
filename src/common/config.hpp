@@ -3,8 +3,9 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include <fstream>
-#include <nlohmann/json.hpp>  // Assume installed
+#include <nlohmann/json.hpp>
 
 struct Shard {
     std::string type;
@@ -24,7 +25,8 @@ struct NodeConfig {
     std::string data_file;
     std::string global_data_file;
     std::string date_field;
-    Shard* shard;  // nullptr if null
+    Shard* shard;
+    std::map<std::string, int> neighbor_ports;
 };
 
 NodeConfig load_node_config(const std::string& config_path, const std::string& node_id) {
@@ -61,6 +63,11 @@ NodeConfig load_node_config(const std::string& config_path, const std::string& n
     } else {
         config.shard = nullptr;
     }
+
+    for (const auto& [nid, ndata] : j["nodes"].items()) {
+        config.neighbor_ports[nid] = ndata["port"].get<int>();
+    }
+
     return config;
 }
 

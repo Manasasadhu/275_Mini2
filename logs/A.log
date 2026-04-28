@@ -3,5 +3,3 @@ Initialized neighbor G at localhost:50057
 Initialized neighbor H at localhost:50058
 Initialized neighbor I at localhost:50059
 Server listening on localhost:50051
-[A] Gateway received query: request_id=q1, plate_violation_history{plate=JER1863,code=67,dates=2022-06-01..2023-12-31}
-[A] Forwarding query to neighbor B
