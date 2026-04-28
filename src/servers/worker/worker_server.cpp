@@ -8,6 +8,7 @@
 
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/server_builder.h>
+#include <absl/log/initialize.h>
 
 #include "parking_violation_query.grpc.pb.h"
 #include "../../common/config.hpp"
@@ -253,6 +254,7 @@ void RunWorker(const std::string& config_file) {
 }
 
 int main(int argc, char** argv) {
+    absl::InitializeLog();
     if (argc != 2) {
         std::cerr << "Usage: " << argv[0] << " <config_file>\n";
         return 1;

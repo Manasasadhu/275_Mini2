@@ -160,22 +160,26 @@ pip install grpcio grpcio-tools
 
 ---
 
-## Build
+## Steps to Run (Single Host)
 
-### 1. Generate proto stubs (run once)
+### Step 1 — Go to the project folder
+
+```bash
+cd "/path/to/275-mini2-DOB-Permit-Issuance"
+```
+
+### Step 2 — Generate proto stubs (run once only)
 
 ```bash
 ./generate_proto.sh
 ```
 
-This generates C++ stubs into `proto/generated/cpp/` and Python stubs into `proto/generated/python/`.
-
-### 2. Build C++ binaries
+### Step 3 — Build C++ binaries (run once only)
 
 ```bash
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+make -j4
 cd ..
 ```
 
@@ -186,42 +190,46 @@ This produces five binaries in `build/`:
 - `client` — query client
 - `load_test` — standalone CSV loader test
 
----
-
-## Running (Single Host)
-
-### Start all 9 processes
+### Step 4 — Start all 9 processes
 
 ```bash
 ./start_all.sh
 ```
 
-Processes start leaf-first (workers → team leaders → leader) so each parent can connect to its children immediately. Logs go to `logs/` and stdout is captured per process in `logs/<name>_stdout.log`.
+Processes start leaf-first (workers → team leaders → leader). Logs go to `logs/`.
 
-### Run queries
+### Step 5 — Run queries
 
 ```bash
 # Health check
 ./build/client --health
 
-# Query by county
-./build/client --county NY --max 500
-./build/client --county BK --max 1000
+# Query by borough
+./build/client --county NY --max 100     # Manhattan
+./build/client --county BK --max 200     # Brooklyn
+./build/client --county BX --max 100     # Bronx
+./build/client --county QN --max 100     # Queens
+./build/client --county ST --max 100     # Staten Island
 
-# Query by violation code
-./build/client --code 21 --max 200
+# All counties in parallel
+./build/client --max 500
 
-# Query by date range
+# With date range
 ./build/client --county NY --start 01/01/2025 --end 06/30/2025
 
-# All counties (all workers active in parallel)
-./build/client --max 5000
-
 # Print every record
-./build/client --county ST --max 100 --verbose
+./build/client --county ST --max 50 --verbose
 ```
 
-### Client options
+### Step 6 — Stop all processes
+
+```bash
+./stop_all.sh
+```
+
+---
+
+## Client Options
 
 | Flag | Description | Default |
 |---|---|---|
@@ -234,12 +242,6 @@ Processes start leaf-first (workers → team leaders → leader) so each parent 
 | `--max N` | Max records to return | 1000 |
 | `--health` | Health check only | — |
 | `--verbose` | Print every record | — |
-
-### Stop all processes
-
-```bash
-./stop_all.sh
-```
 
 ---
 
@@ -268,9 +270,9 @@ Processes start leaf-first (workers → team leaders → leader) so each parent 
 The client prints elapsed time after every query:
 ```
 [Client] query complete
-  total_records = 1000
+  total_records = 100
   total_chunks  = 2
-  elapsed_ms    = 1842
+  elapsed_ms    = 6
 ```
 
 ### 2. Metrics logs
@@ -280,9 +282,9 @@ Every process writes structured event logs to `logs/<process_id>_<role>.log`:
 tail -f logs/*.log
 ```
 
-Key events logged: `RECV_QUERY`, `RECV_DELEGATION`, `LOADED`, `CHUNK_SENT`, `RELAY_CHUNK`, `QUERY_DONE`, `CANCELLED`.
+Key events: `RECV_QUERY`, `RECV_DELEGATION`, `LOADED`, `CHUNK_SENT`, `RELAY_CHUNK`, `QUERY_DONE`, `CANCELLED`.
 
-### 3. Concurrent clients (throughput)
+### 3. Concurrent clients
 
 ```bash
 for i in 1 2 3 4 5; do
@@ -290,8 +292,6 @@ for i in 1 2 3 4 5; do
 done
 wait
 ```
-
-Watch `pending=` in the logs to see how many requests each process handles simultaneously.
 
 ---
 
@@ -321,7 +321,7 @@ Each process reads its settings from a JSON config file. No settings are hardcod
 }
 ```
 
-For two-host deployment, update the `host` fields in the `edges` arrays of configs on Computer 1 to point to Computer 2's IP address, and vice versa.
+For two-host deployment, update the `host` fields in the `edges` arrays to the actual IP addresses of the remote machines.
 
 ---
 
@@ -332,9 +332,23 @@ Service defined in [proto/parking_violation_query.proto](proto/parking_violation
 | Message | Purpose |
 |---|---|
 | `QueryRequest` | Client filter: county, violation code, date range, max records |
-| `QueryResponse` | Chunked streaming response to client (is_final on last chunk) |
+| `QueryResponse` | Chunked streaming response to client (`is_final` on last chunk) |
 | `DelegationRequest` | Internal: carries serialized `QueryRequest` as bytes |
 | `DelegationResponse` | Internal: chunk of `ViolationRecord` messages flowing back up |
 | `ViolationRecord` | Full typed record — 43 fields (int64, int32, bool, string) |
 | `HealthRequest/Response` | Liveness check |
 | `CancelRequest/Response` | Cancellation acknowledgement |
+
+---
+
+## Troubleshooting
+
+| Error | Fix |
+|---|---|
+| `grpc_cpp_plugin not found` | `brew install grpc` |
+| `No module named grpc_tools` | `pip install grpcio grpcio-tools` |
+| `Binary not found in build/` | Run `make -j4` inside `build/` |
+| `Connection refused on 50051` | Run `./start_all.sh` first |
+| `Failed to parse query` | Re-run `./generate_proto.sh` and rebuild |
+| CSV path wrong | Update `data_path` in all `configs/*.json` |
+| Segmentation fault on startup | Ensure gRPC is installed via `brew install grpc` and rebuild with `cmake .. && make -j4` |

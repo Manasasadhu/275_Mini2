@@ -10,6 +10,7 @@
 
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/create_channel.h>
+#include <absl/log/initialize.h>
 
 #include "parking_violation_query.grpc.pb.h"
 
@@ -169,6 +170,7 @@ static bool hasFlag(int argc, char** argv, const std::string& flag) {
 // main
 // -------------------------------------------------------------------------
 int main(int argc, char** argv) {
+    absl::InitializeLog();
     if (hasFlag(argc, argv, "--help") || hasFlag(argc, argv, "-h")) {
         std::cout <<
             "Usage: client [options]\n"
