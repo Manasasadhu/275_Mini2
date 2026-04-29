@@ -79,6 +79,12 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     fwd_request.violation_code = request.violation_code
                 elif request.HasField('issue_date'):
                     fwd_request.issue_date.CopyFrom(request.issue_date)
+                elif request.HasField('plate_violation_history'):
+                    fwd_request.plate_violation_history.CopyFrom(request.plate_violation_history)
+                elif request.HasField('precinct_vehicle_analysis'):
+                    fwd_request.precinct_vehicle_analysis.CopyFrom(request.precinct_vehicle_analysis)
+                elif request.HasField('unregistered_vehicle_lookup'):
+                    fwd_request.unregistered_vehicle_lookup.CopyFrom(request.unregistered_vehicle_lookup)
                 
                 fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(fwd_request)
                 for chunk in fwd_response.chunks:
@@ -160,16 +166,65 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                                 continue
                         except:
                             continue
-                    # date_range queries checked by shard above
+                    elif request.HasField('plate_violation_history'):
+                        q = request.plate_violation_history
+                        if row.get('Plate ID') != q.plate_id:
+                            continue
+                        if q.violation_code != 0 and int(row.get('Violation Code', 0)) != q.violation_code:
+                            continue
+                        # Date range already checked by shard
+                    elif request.HasField('precinct_vehicle_analysis'):
+                        q = request.precinct_vehicle_analysis
+                        try:
+                            vehicle_year = int(row.get('Vehicle Year', 0))
+                            if row.get('Violation County') != q.county:
+                                continue
+                            if q.precinct != 0 and int(row.get('Violation Precinct', 0)) != q.precinct:
+                                continue
+                            if not (q.vehicle_year_min == 0 and q.vehicle_year_max == 9999) and \
+                               (vehicle_year < q.vehicle_year_min or vehicle_year > q.vehicle_year_max):
+                                continue
+                            if q.body_type and row.get('Vehicle Body Type') != q.body_type:
+                                continue
+                        except:
+                            continue
+                    elif request.HasField('unregistered_vehicle_lookup'):
+                        q = request.unregistered_vehicle_lookup
+                        try:
+                            feet = int(row.get('Feet From Curb', 0))
+                            unregistered = row.get('Unregistered Vehicle?', '').strip() == '1'
+                            if (unregistered != q.unregistered or
+                                row.get('Registration State') != q.state or
+                                feet < q.feet_from_curb_min):
+                                continue
+                        except:
+                            continue
                     
                     # Create record
                     record = parking_violation_query_pb2.ViolationRecord()
+                    record.summons_number = int(row.get('Summons Number', '0') or 0)
                     record.plate_id = row.get('Plate ID', '')
                     record.registration_state = row.get('Registration State', '')
+                    record.plate_type = row.get('Plate Type', '')
                     record.issue_date = row.get('Issue Date', '')
                     record.violation_code = int(row.get('Violation Code', '0') or 0)
+                    record.vehicle_body_type = row.get('Vehicle Body Type', '')
                     record.vehicle_make = row.get('Vehicle Make', '')
+                    record.issuing_agency = row.get('Issuing Agency', '')
+                    record.violation_location = row.get('Violation Location', '')
+                    record.violation_precinct = int(row.get('Violation Precinct', '0') or 0)
                     record.violation_description = row.get('Violation Description', '')
+                    record.fine_amount = int(row.get('Fine Amount', '0') or 0)
+                    record.precinct = row.get('Violation Precinct', '')
+                    record.county = row.get('Violation County', '')
+                    record.issuing_agency_name = row.get('Issuing Agency Name', '')
+                    record.violation_status = row.get('Violation Status', '')
+                    record.violation_county = row.get('Violation County', '')
+                    record.unregistered_vehicle = row.get('Unregistered Vehicle?', '').strip() == '1'
+                    record.vehicle_year = int(row.get('Vehicle Year', '0') or 0)
+                    record.feet_from_curb = int(row.get('Feet From Curb', '0') or 0)
+                    record.street_name = row.get('Street Name', '')
+                    record.vehicle_color = row.get('Vehicle Color', '')
                     
                     current_chunk.records.append(record)
                     

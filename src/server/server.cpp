@@ -62,6 +62,12 @@ private:
         } else if (request->has_issue_date()) {
             forward_req.mutable_issue_date()->set_start(request->issue_date().start());
             forward_req.mutable_issue_date()->set_end(request->issue_date().end());
+        } else if (request->has_plate_violation_history()) {
+            forward_req.mutable_plate_violation_history()->CopyFrom(request->plate_violation_history());
+        } else if (request->has_precinct_vehicle_analysis()) {
+            forward_req.mutable_precinct_vehicle_analysis()->CopyFrom(request->precinct_vehicle_analysis());
+        } else if (request->has_unregistered_vehicle_lookup()) {
+            forward_req.mutable_unregistered_vehicle_lookup()->CopyFrom(request->unregistered_vehicle_lookup());
         }
         forward_req.set_chunk_size(request->chunk_size());
         
@@ -113,16 +119,14 @@ private:
         // Step 1: Process own shard if this is a worker node
         std::vector<parkingviolation::Chunk> all_chunks;
         if (config_.shard && !data_file.empty()) {
-            std::string plate_id = request->has_plate_id() ? request->plate_id() : "";
-            std::cout << "[" << config_.node_id << "] Processing own shard (worker) for plate: " << plate_id << std::endl;
+            std::cout << "[" << config_.node_id << "] Processing own shard (worker)" << std::endl;
             
             auto chunks = process_query_on_shard(
                 data_file,
                 config_.shard->start,
                 config_.shard->end,
-                plate_id,
-                config_.chunk_size,
-                req_id
+                request,
+                config_.chunk_size
             );
             all_chunks.insert(all_chunks.end(), chunks.begin(), chunks.end());
             std::cout << "[" << config_.node_id << "] Own shard returned " << chunks.size() << " chunks" << std::endl;

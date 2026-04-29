@@ -3,3 +3,36 @@ Initialized neighbor C at localhost:50053
 Initialized neighbor D at localhost:50054
 Initialized neighbor E at localhost:50055
 Server listening on localhost:50052
+[B] ForwardQuery received: request_id=q1, from_node=A
+[B] Node is relay/gateway, forwarding to neighbors...
+[B] Skipping A (query came from here)
+[B] Forwarding to neighbor C
+[B] Error forwarding to C: Unexpected error in RPC handling
+[B] Forwarding to neighbor D
+[B] Error forwarding to D: Unexpected error in RPC handling
+[B] Forwarding to neighbor E
+[B] Query q1 already processed, skipping
+[B] Collected 138 chunks from E
+[B] Returning 138 total chunks for request q1
+[B] ForwardQuery received: request_id=q2, from_node=A
+[B] Node is relay/gateway, forwarding to neighbors...
+[B] Skipping A (query came from here)
+[B] Forwarding to neighbor C
+[B] Error forwarding to C: Unexpected error in RPC handling
+[B] Forwarding to neighbor D
+[B] Error forwarding to D: Unexpected error in RPC handling
+[B] Forwarding to neighbor E
+[B] Query q2 already processed, skipping
+[B] Collected 32 chunks from E
+[B] Returning 32 total chunks for request q2
+[B] ForwardQuery received: request_id=q3, from_node=A
+[B] Node is relay/gateway, forwarding to neighbors...
+[B] Skipping A (query came from here)
+[B] Forwarding to neighbor C
+[B] Error forwarding to C: Unexpected error in RPC handling
+[B] Forwarding to neighbor D
+[B] Error forwarding to D: Unexpected error in RPC handling
+[B] Forwarding to neighbor E
+[B] Query q3 already processed, skipping
+[B] Collected 0 chunks from E
+[B] Returning 0 total chunks for request q3

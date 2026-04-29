@@ -3,3 +3,33 @@ Initialized neighbor G at localhost:50057
 Initialized neighbor H at localhost:50058
 Initialized neighbor I at localhost:50059
 Server listening on localhost:50051
+[A] Gateway received query: request_id=q1, plate_id=
+[A] Forwarding query to neighbor B
+[A] Received 138 chunks from B
+[A] Forwarding query to neighbor G
+[A] Received 0 chunks from G
+[A] Forwarding query to neighbor H
+[A] Received 190 chunks from H
+[A] Forwarding query to neighbor I
+[A] Received 91 chunks from I
+[A] Gateway response contains 419 total chunks
+[A] Gateway received query: request_id=q2, plate_id=
+[A] Forwarding query to neighbor B
+[A] Received 32 chunks from B
+[A] Forwarding query to neighbor G
+[A] Received 0 chunks from G
+[A] Forwarding query to neighbor H
+[A] Received 19 chunks from H
+[A] Forwarding query to neighbor I
+[A] Received 28 chunks from I
+[A] Gateway response contains 79 total chunks
+[A] Gateway received query: request_id=q3, plate_id=
+[A] Forwarding query to neighbor B
+[A] Received 0 chunks from B
+[A] Forwarding query to neighbor G
+[A] Received 0 chunks from G
+[A] Forwarding query to neighbor H
+[A] Error forwarding to H: CLIENT: Received message larger than max (629608505 vs. 4194304)
+[A] Forwarding query to neighbor I
+[A] Error forwarding to I: CLIENT: Received message larger than max (825158737 vs. 4194304)
+[A] Gateway response contains 0 total chunks
