@@ -1,3 +1,12 @@
 Initialized neighbor B at localhost:50052
 Initialized neighbor E at localhost:50055
 Server listening on localhost:50054
+[D] ForwardQuery received: request_id=q1, from_node=A
+[D] Processing own shard (worker)
+[D] Query q1 already processed, skipping
+[D] ForwardQuery received: request_id=q2, from_node=A
+[D] Processing own shard (worker)
+[D] Query q2 already processed, skipping
+[D] ForwardQuery received: request_id=q3, from_node=A
+[D] Processing own shard (worker)
+[D] Query q3 already processed, skipping
