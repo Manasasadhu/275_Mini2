@@ -32,7 +32,7 @@ A multi-node distributed query system for NYC parking violations data. 9 nodes f
   - Date range filtering by shard
   - Plate ID search
   - CSV parsing and chunking
-- [x] Test infrastructure (`scripts/test_query.sh`)
+- [x] Client implementation for executing queries against gateway (`src/client/client.cpp`)
 
 ### 🟡 In Progress / Pending
 - [ ] **Gateway Forwarding**: Node A forwards queries to all neighbors (B, G, H, I)
@@ -233,6 +233,20 @@ Summons Number,Plate ID,Registration State,Plate Type,Issue Date,Violation Code,
 - `Issue Date` (column 5): Date in MM/DD/YYYY format
 - `Violation Code` (column 6): Code for violation type
 - File size: ~11 GB
+
+### Regenerate Python protobuf stubs
+If the generated Python gRPC files are missing or need to be recreated, run:
+
+```bash
+bash scripts/gen_proto.sh
+```
+
+This regenerates:
+- `python/server/parking_violation_query_pb2.py`
+- `python/server/parking_violation_query_pb2_grpc.py`
+- `python/server/parking_violation_query_pb2.pyi`
+
+These files are generated from `proto/parking_violation_query.proto` and are intentionally not tracked in Git.
 
 ---
 
@@ -453,7 +467,7 @@ tail -f logs/C.log
 ├── scripts/
 │   ├── run_all.sh                             # Start all node servers
 │   ├── stop_all.sh                            # Stop all servers
-│   └── test_query.sh                          # Documentation of test procedure
+│   └── gen_proto.sh                           # Regenerate Python protobuf stubs
 ├── build/                                     # CMake output (auto-generated)
 ├── logs/                                      # Node log files + PIDs
 ├── CMakeLists.txt

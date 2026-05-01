@@ -46,10 +46,17 @@ private:
         }
         
         std::string req_id = request->request_id();
-        std::string plate_id = request->has_plate_id() ? request->plate_id() : "";
+        std::string query_type = "unknown";
+        if (request->has_plate_id()) query_type = "plate_id";
+        else if (request->has_violation_code()) query_type = "violation_code";
+        else if (request->has_issue_date()) query_type = "issue_date";
+        else if (request->has_plate_violation_history()) query_type = "plate_violation_history";
+        else if (request->has_violation_code_date_range()) query_type = "violation_code_date_range";
+        else if (request->has_precinct_vehicle_analysis()) query_type = "precinct_vehicle_analysis";
+        else if (request->has_unregistered_vehicle_lookup()) query_type = "unregistered_vehicle_lookup";
         
         std::cout << "[" << config_.node_id << "] Gateway received query: request_id=" << req_id 
-                  << ", plate_id=" << plate_id << std::endl;
+                  << ", type=" << query_type << ", chunk_size=" << request->chunk_size() << std::endl;
         
         // Convert QueryRequest to ForwardRequest
         parkingviolation::ForwardRequest forward_req;
@@ -64,6 +71,8 @@ private:
             forward_req.mutable_issue_date()->set_end(request->issue_date().end());
         } else if (request->has_plate_violation_history()) {
             forward_req.mutable_plate_violation_history()->CopyFrom(request->plate_violation_history());
+        } else if (request->has_violation_code_date_range()) {
+            forward_req.mutable_violation_code_date_range()->CopyFrom(request->violation_code_date_range());
         } else if (request->has_precinct_vehicle_analysis()) {
             forward_req.mutable_precinct_vehicle_analysis()->CopyFrom(request->precinct_vehicle_analysis());
         } else if (request->has_unregistered_vehicle_lookup()) {
@@ -102,6 +111,14 @@ private:
                               parkingviolation::ForwardResponse* response) override {
         std::string req_id = request->request_id();
         std::string from_node = request->from_node();
+        std::string query_type = "unknown";
+        if (request->has_plate_id()) query_type = "plate_id";
+        else if (request->has_violation_code()) query_type = "violation_code";
+        else if (request->has_issue_date()) query_type = "issue_date";
+        else if (request->has_plate_violation_history()) query_type = "plate_violation_history";
+        else if (request->has_violation_code_date_range()) query_type = "violation_code_date_range";
+        else if (request->has_precinct_vehicle_analysis()) query_type = "precinct_vehicle_analysis";
+        else if (request->has_unregistered_vehicle_lookup()) query_type = "unregistered_vehicle_lookup";
         
         // Deduplication check
         if (processed_requests_.count(req_id)) {
@@ -111,7 +128,8 @@ private:
         processed_requests_.insert(req_id);
         
         std::cout << "[" << config_.node_id << "] ForwardQuery received: request_id=" << req_id 
-                  << ", from_node=" << from_node << std::endl;
+                  << ", from_node=" << from_node << ", type=" << query_type 
+                  << ", neighbors=" << config_.neighbors.size() << std::endl;
 
         // Get data file from config
         std::string data_file = config_.data_file.empty() ? config_.global_data_file : config_.data_file;
