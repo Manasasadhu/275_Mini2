@@ -59,7 +59,9 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         if not self.config.client_facing:
             context.abort(grpc.StatusCode.UNIMPLEMENTED, 'Not client-facing')
         
-        print(f"[{self.config.node_id}] Gateway received query: request_id={request.request_id}")
+        query_type = request.WhichOneof('query') or 'unknown'
+        print(f"[{self.config.node_id}] Gateway received query: request_id={request.request_id}, type={query_type}, chunk_size={request.chunk_size}")
+        print(f"[{self.config.node_id}] Gateway neighbors={self.config.neighbors}")
         
         response = parking_violation_query_pb2.QueryResponse()
         
@@ -81,6 +83,8 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     fwd_request.issue_date.CopyFrom(request.issue_date)
                 elif request.HasField('plate_violation_history'):
                     fwd_request.plate_violation_history.CopyFrom(request.plate_violation_history)
+                elif request.HasField('violation_code_date_range'):
+                    fwd_request.violation_code_date_range.CopyFrom(request.violation_code_date_range)
                 elif request.HasField('precinct_vehicle_analysis'):
                     fwd_request.precinct_vehicle_analysis.CopyFrom(request.precinct_vehicle_analysis)
                 elif request.HasField('unregistered_vehicle_lookup'):
@@ -98,12 +102,16 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
     def ForwardQuery(self, request, context):
         req_id = request.request_id
         from_node = request.from_node
+        query_type = request.WhichOneof('query') or 'unknown'
         
         # Deduplication
         if req_id in self.processed_requests:
             print(f"[{self.config.node_id}] Dedup: already processed {req_id}")
             return parking_violation_query_pb2.ForwardResponse()
         self.processed_requests.add(req_id)
+
+        print(f"[{self.config.node_id}] ForwardQuery received: request_id={req_id}, from_node={from_node}, type={query_type}")
+        print(f"[{self.config.node_id}] Forwarding neighbors={self.config.neighbors}")
 
         response = parking_violation_query_pb2.ForwardResponse()
         
@@ -134,10 +142,12 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
     def process_query_on_shard(self, request):
         """Process query on local shard"""
         chunks = []
+        matched = 0
         current_chunk = parking_violation_query_pb2.Chunk(
             request_id=request.request_id, 
             is_last=False
         )
+        print(f"[{self.config.node_id}] Processing shard: file={self.config.data_file}, shard={self.config.shard}, request_id={request.request_id}, chunk_size={request.chunk_size}")
         
         try:
             with open(self.config.data_file, 'r') as f:
@@ -171,6 +181,13 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                         if row.get('Plate ID') != q.plate_id:
                             continue
                         if q.violation_code != 0 and int(row.get('Violation Code', 0)) != q.violation_code:
+                            continue
+                        if q.registration_state and row.get('Registration State') != q.registration_state:
+                            continue
+                        # Date range already checked by shard
+                    elif request.HasField('violation_code_date_range'):
+                        q = request.violation_code_date_range
+                        if int(row.get('Violation Code', 0)) != q.violation_code:
                             continue
                         # Date range already checked by shard
                     elif request.HasField('precinct_vehicle_analysis'):
@@ -227,6 +244,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     record.vehicle_color = row.get('Vehicle Color', '')
                     
                     current_chunk.records.append(record)
+                    matched += 1
                     
                     if len(current_chunk.records) >= request.chunk_size:
                         chunks.append(current_chunk)
@@ -241,7 +259,13 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         if current_chunk.records:
             current_chunk.is_last = True
             chunks.append(current_chunk)
-        
+        elif not chunks:
+            current_chunk.is_last = True
+            chunks.append(current_chunk)
+        else:
+            chunks[-1].is_last = True
+
+        print(f"[{self.config.node_id}] Shard query complete: matched={matched}, chunks={len(chunks)}")
         return chunks
 
     def CancelQuery(self, request, context):
@@ -258,7 +282,7 @@ def serve(config_file, node_id):
     server.add_insecure_port(f'{config.host}:{config.port}')
     server.start()
     print(f"[{node_id}] Server started on {config.host}:{config.port}")
-    print(f"[{node_id}] Role: {config.role}, Team: {config.language}")
+    print(f"[{node_id}] Role: {config.role}, Language: {config.language}, neighbors={config.neighbors}")
     server.wait_for_termination()
 
 if __name__ == '__main__':

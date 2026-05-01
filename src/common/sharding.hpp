@@ -13,16 +13,19 @@ using namespace parkingviolation;
 // Parse MM/DD/YYYY to compare with YYYY-MM-DD
 bool date_in_range(const std::string& issue_date, const std::string& shard_start, const std::string& shard_end) {
     if (issue_date.length() < 10) return false;
-    // Convert MM/DD/YYYY to YYYYMMDD for comparison
-    int m = std::stoi(issue_date.substr(0, 2));
-    int d = std::stoi(issue_date.substr(3, 2));
-    int y = std::stoi(issue_date.substr(6, 4));
-    std::string normalized = std::to_string(y) + (m < 10 ? "0" : "") + std::to_string(m) + (d < 10 ? "0" : "") + std::to_string(d);
-    
-    std::string start_norm = shard_start.substr(0, 4) + shard_start.substr(5, 2) + shard_start.substr(8, 2);
-    std::string end_norm = shard_end.substr(0, 4) + shard_end.substr(5, 2) + shard_end.substr(8, 2);
-    
-    return normalized >= start_norm && normalized <= end_norm;
+    try {
+        // Convert MM/DD/YYYY to YYYYMMDD for comparison
+        int m = std::stoi(issue_date.substr(0, 2));
+        int d = std::stoi(issue_date.substr(3, 2));
+        int y = std::stoi(issue_date.substr(6, 4));
+        std::string normalized = std::to_string(y) + (m < 10 ? "0" : "") + std::to_string(m) + (d < 10 ? "0" : "") + std::to_string(d);
+        
+        std::string start_norm = shard_start.substr(0, 4) + shard_start.substr(5, 2) + shard_start.substr(8, 2);
+        std::string end_norm = shard_end.substr(0, 4) + shard_end.substr(5, 2) + shard_end.substr(8, 2);
+        return normalized >= start_norm && normalized <= end_norm;
+    } catch (...) {
+        return false;
+    }
 }
 
 // Build ViolationRecord from CSV line
@@ -82,8 +85,16 @@ std::vector<Chunk> process_query_on_shard(
     int chunk_size
 ) {
     std::vector<Chunk> chunks;
+    std::cout << "[SHARD] Starting shard scan for request " << request->request_id()
+              << " file=" << csv_path
+              << " shard_start=" << shard_start
+              << " shard_end=" << shard_end
+              << " chunk_size=" << chunk_size << std::endl;
     std::ifstream file(csv_path);
-    if (!file.is_open()) return chunks;
+    if (!file.is_open()) {
+        std::cerr << "[SHARD] Failed to open data file: " << csv_path << std::endl;
+        return chunks;
+    }
     
     std::string line;
     std::getline(file, line);  // Skip header
@@ -108,7 +119,13 @@ std::vector<Chunk> process_query_on_shard(
             pos++;
         }
         
-        if (!date_in_range(issue_date, shard_start, shard_end)) continue;
+        bool valid_date = false;
+        try {
+            valid_date = date_in_range(issue_date, shard_start, shard_end);
+        } catch (...) {
+            valid_date = false;
+        }
+        if (!valid_date) continue;
         
         ViolationRecord record = parse_csv_line(line);
         
@@ -124,7 +141,12 @@ std::vector<Chunk> process_query_on_shard(
             const auto& q = request->plate_violation_history();
             matches = (record.plate_id() == q.plate_id()) &&
                      (q.violation_code() == 0 || record.violation_code() == q.violation_code()) &&
+                     (q.registration_state().empty() || record.registration_state() == q.registration_state()) &&
                      date_in_range(issue_date, q.date_range().start(), q.date_range().end());
+        } else if (request->has_violation_code_date_range()) {
+            const auto& q = request->violation_code_date_range();
+            matches = (record.violation_code() == q.violation_code()) &&
+                      date_in_range(issue_date, q.date_range().start(), q.date_range().end());
         } else if (request->has_precinct_vehicle_analysis()) {
             const auto& q = request->precinct_vehicle_analysis();
             matches = (record.violation_county() == q.county()) &&
@@ -161,6 +183,8 @@ std::vector<Chunk> process_query_on_shard(
     } else {
         chunks.back().set_is_last(true);
     }
+    std::cout << "[SHARD] Completed shard scan for request " << request->request_id()
+              << ", chunks=" << chunks.size() << std::endl;
     
     return chunks;
 }
