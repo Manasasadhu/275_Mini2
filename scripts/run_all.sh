@@ -2,6 +2,10 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$ROOT_DIR"
+
 LOG_DIR="logs"
 CONFIG="configs/nodes.json"
 CPP_SERVER="build/server"
@@ -13,6 +17,7 @@ if command -v python3.10 >/dev/null 2>&1; then
 fi
 
 mkdir -p "$LOG_DIR"
+rm -f "$LOG_DIR"/*.log "$LOG_DIR"/*.pid
 
 # C++ nodes (A, B, C, D, E, G)
 for node in A B C D E G; do
@@ -25,7 +30,7 @@ done
 # Python nodes (F, H, I)
 for node in F H I; do
     echo "Starting Python node $node with $PYTHON_BIN..."
-    "$PYTHON_BIN" "$PYTHON_SERVER" -n "$node" -c "$CONFIG" > "$LOG_DIR/$node.log" 2>&1 &
+    PYTHONUNBUFFERED=1 "$PYTHON_BIN" "$PYTHON_SERVER" -n "$node" -c "$CONFIG" > "$LOG_DIR/$node.log" 2>&1 &
     echo $! > "$LOG_DIR/$node.pid"
     sleep 0.5
 done

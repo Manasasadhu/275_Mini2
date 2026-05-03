@@ -45,11 +45,12 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         self.neighbor_stubs = {}  # gRPC stubs to neighbors
         
         # Initialize gRPC stubs to all neighbors
+        msg_options = [('grpc.max_receive_message_length', -1), ('grpc.max_send_message_length', -1)]
         for neighbor in config.neighbors:
             port = config.get_neighbor_port(neighbor)
             neighbor_addr = f"localhost:{port}"
             try:
-                channel = grpc.insecure_channel(neighbor_addr)
+                channel = grpc.insecure_channel(neighbor_addr, options=msg_options)
                 self.neighbor_stubs[neighbor] = parking_violation_query_pb2_grpc.ParkingViolationServiceStub(channel)
                 print(f"[{config.node_id}] Initialized neighbor {neighbor} at {neighbor_addr}")
             except Exception as e:
@@ -90,7 +91,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                 elif request.HasField('unregistered_vehicle_lookup'):
                     fwd_request.unregistered_vehicle_lookup.CopyFrom(request.unregistered_vehicle_lookup)
                 
-                fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(fwd_request)
+                fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(fwd_request, timeout=120)
                 for chunk in fwd_response.chunks:
                     response.chunks.append(chunk)
                 print(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
@@ -115,20 +116,18 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
 
         response = parking_violation_query_pb2.ForwardResponse()
         
-        # Forward to neighbors except the one that sent it
-        print(f"[{self.config.node_id}] Forwarding query {req_id} to neighbors (excluding {from_node})")
-        for neighbor in self.config.neighbors:
-            if neighbor == from_node:
-                print(f"[{self.config.node_id}] Skipping {neighbor} (query came from here)")
-                continue
-            
-            try:
-                fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(request)
-                for chunk in fwd_response.chunks:
-                    response.chunks.append(chunk)
-                print(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
-            except Exception as e:
-                print(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
+        # Forward to neighbors except the one that sent it (relay/gateway only)
+        if self.config.role in ('relay', 'gateway'):
+            for neighbor in self.config.neighbors:
+                if neighbor == from_node:
+                    print(f"[{self.config.node_id}] Skipping {neighbor} (query came from here)")
+                    continue
+                try:
+                    fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(request, timeout=600)
+                    response.chunks.extend(fwd_response.chunks)
+                    print(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
+                except Exception as e:
+                    print(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
 
         # Process own shard if this node is a worker
         if self.config.shard:
@@ -149,24 +148,34 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         )
         print(f"[{self.config.node_id}] Processing shard: file={self.config.data_file}, shard={self.config.shard}, request_id={request.request_id}, chunk_size={request.chunk_size}")
         
+        shard_start = datetime.strptime(self.config.shard['start'], '%Y-%m-%d')
+        shard_end = datetime.strptime(self.config.shard['end'], '%Y-%m-%d')
+
+        q_date_start = q_date_end = None
+        if request.HasField('issue_date'):
+            q_date_start = datetime.strptime(request.issue_date.start, '%Y-%m-%d')
+            q_date_end = datetime.strptime(request.issue_date.end, '%Y-%m-%d')
+        elif request.HasField('plate_violation_history') and request.plate_violation_history.date_range.start:
+            q_date_start = datetime.strptime(request.plate_violation_history.date_range.start, '%Y-%m-%d')
+            q_date_end = datetime.strptime(request.plate_violation_history.date_range.end, '%Y-%m-%d')
+        elif request.HasField('violation_code_date_range') and request.violation_code_date_range.date_range.start:
+            q_date_start = datetime.strptime(request.violation_code_date_range.date_range.start, '%Y-%m-%d')
+            q_date_end = datetime.strptime(request.violation_code_date_range.date_range.end, '%Y-%m-%d')
+
         try:
             with open(self.config.data_file, 'r') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    # Check shard date range
-                    issue_date_str = row[self.config.date_field]  # 'Issue Date'
+                    issue_date_str = row[self.config.date_field]
                     try:
                         issue_date = datetime.strptime(issue_date_str, '%m/%d/%Y')
                     except:
                         continue
-                    
-                    shard_start = datetime.strptime(self.config.shard['start'], '%Y-%m-%d')
-                    shard_end = datetime.strptime(self.config.shard['end'], '%Y-%m-%d')
-                    
+
                     if not (shard_start <= issue_date <= shard_end):
                         continue
                     
-                    # Check query type
+                    # Query filter
                     if request.HasField('plate_id'):
                         if row.get('Plate ID') != request.plate_id:
                             continue
@@ -176,6 +185,9 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                                 continue
                         except:
                             continue
+                    elif request.HasField('issue_date'):
+                        if q_date_start and not (q_date_start <= issue_date <= q_date_end):
+                            continue
                     elif request.HasField('plate_violation_history'):
                         q = request.plate_violation_history
                         if row.get('Plate ID') != q.plate_id:
@@ -184,12 +196,17 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                             continue
                         if q.registration_state and row.get('Registration State') != q.registration_state:
                             continue
-                        # Date range already checked by shard
+                        if q_date_start and not (q_date_start <= issue_date <= q_date_end):
+                            continue
                     elif request.HasField('violation_code_date_range'):
                         q = request.violation_code_date_range
-                        if int(row.get('Violation Code', 0)) != q.violation_code:
+                        try:
+                            if int(row.get('Violation Code', 0)) != q.violation_code:
+                                continue
+                        except:
                             continue
-                        # Date range already checked by shard
+                        if q_date_start and not (q_date_start <= issue_date <= q_date_end):
+                            continue
                     elif request.HasField('precinct_vehicle_analysis'):
                         q = request.precinct_vehicle_analysis
                         try:
@@ -198,7 +215,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                                 continue
                             if q.precinct != 0 and int(row.get('Violation Precinct', 0)) != q.precinct:
                                 continue
-                            if not (q.vehicle_year_min == 0 and q.vehicle_year_max == 9999) and \
+                            if not (q.vehicle_year_min == 0 and q.vehicle_year_max == 0) and \
                                (vehicle_year < q.vehicle_year_min or vehicle_year > q.vehicle_year_max):
                                 continue
                             if q.body_type and row.get('Vehicle Body Type') != q.body_type:
@@ -255,11 +272,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         except Exception as e:
             print(f"[{self.config.node_id}] Error processing shard: {e}", file=sys.stderr)
         
-        # Add final chunk
-        if current_chunk.records:
-            current_chunk.is_last = True
-            chunks.append(current_chunk)
-        elif not chunks:
+        if current_chunk.records or not chunks:
             current_chunk.is_last = True
             chunks.append(current_chunk)
         else:
@@ -276,7 +289,8 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
 
 def serve(config_file, node_id):
     config = Config(config_file, node_id)
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10),
+                         options=[('grpc.max_receive_message_length', -1), ('grpc.max_send_message_length', -1)])
     parking_violation_query_pb2_grpc.add_ParkingViolationServiceServicer_to_server(
         ParkingService(config), server)
     server.add_insecure_port(f'{config.host}:{config.port}')
