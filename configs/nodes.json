@@ -45,7 +45,7 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "issue_date_range", "start": "2018-07-01", "end": "2019-06-30"}
+      "shard": {"type": "issue_date_range", "start": "2022-01-01", "end": "2022-06-30"}
     },
     "D": {
       "node_id": "D",

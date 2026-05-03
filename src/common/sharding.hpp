@@ -151,7 +151,7 @@ std::vector<Chunk> process_query_on_shard(
             const auto& q = request->precinct_vehicle_analysis();
             matches = (record.violation_county() == q.county()) &&
                      (q.precinct() == 0 || record.violation_precinct() == q.precinct()) &&
-                     (q.vehicle_year_min() == 0 && q.vehicle_year_max() == 9999 || 
+                     ((q.vehicle_year_min() == 0 && q.vehicle_year_max() == 0) ||
                       (record.vehicle_year() >= q.vehicle_year_min() && record.vehicle_year() <= q.vehicle_year_max())) &&
                      (q.body_type().empty() || record.vehicle_body_type() == q.body_type());
         } else if (request->has_unregistered_vehicle_lookup()) {
