@@ -17,29 +17,28 @@ A multi-node distributed query system for NYC parking violations data. 9 nodes f
 1. **Plate ID**: Find all violations for a specific license plate
 2. **Violation Code**: Find all violations of a specific type
 3. **Date Range**: Find all violations within a date window
+4. **PlateViolationHistory**: Plate + violation code + date range + registration state
+5. **ViolationCodeDateRange**: Violation code + date range
+6. **PrecinctVehicleAnalysis**: County + precinct + vehicle year range + body type
+7. **UnregisteredVehicleLookup**: Unregistered flag + state + feet-from-curb threshold
 
 ---
 
 ## Implementation Status
 
-### ✅ Completed
+### Completed
 - [x] Shared JSON config system (`configs/nodes.json`)
 - [x] Config loader with global defaults + per-node overrides (`src/common/config.hpp`)
-- [x] Proto definitions for gRPC service (`proto/parking_violation_query.proto`)
-- [x] Server skeleton with gRPC service setup (`src/server/server.cpp`)
-- [x] Client implementation for submitting queries (`src/client/client.cpp`)
-- [x] Compact sharding utility for worker CSV scanning (`src/common/sharding.hpp`)
-  - Date range filtering by shard
-  - Plate ID search
-  - CSV parsing and chunking
-- [x] Client implementation for executing queries against gateway (`src/client/client.cpp`)
-
-### 🟡 In Progress / Pending
-- [ ] **Gateway Forwarding**: Node A forwards queries to all neighbors (B, G, H, I)
-- [ ] **Multi-hop Aggregation**: Intermediate nodes (B, E) aggregate chunks from downstream and forward upstream
-- [ ] **Deduplication**: Nodes D and G handle duplicate processing on converging paths (multiple parents)
-- [ ] **Full end-to-end testing**: Build, start all nodes, test tree queries
-- [ ] Support for violation_code and date_range query types (plate_id working)
+- [x] Proto definitions for gRPC service with 7 query types (`proto/parking_violation_query.proto`)
+- [x] C++ server with gateway forwarding, relay aggregation, worker shard processing (`src/server/server.cpp`)
+- [x] C++ client for all query types with timing (`src/client/client.cpp`)
+- [x] Python server for nodes F, H, I with full query support (`python/server/server.py`)
+- [x] Sharding engine: date filtering, CSV parsing, query matching for all 7 types (`src/common/sharding.hpp`)
+- [x] Gateway forwarding: Node A forwards queries to all neighbors (B, G, H, I)
+- [x] Multi-hop aggregation: Relay nodes (B, E) aggregate chunks from downstream
+- [x] Deduplication: Nodes D and G skip already-processed requests
+- [x] Multi-host support: nodes read host+port from config, servers bind to 0.0.0.0
+- [x] Smart startup scripts for single-host and multi-host deployment
 
 ---
 
@@ -402,45 +401,90 @@ Configured to:
 
 ## Running the System
 
-### 1. Start All Nodes
+### Single-Host (all 9 nodes on one machine)
+
 ```bash
-cd /Users/aravindreddy/IdeaProjects/275_Mini2
+# Start all nodes
+bash scripts/start_node.sh localhost
 
-# Start all 9 nodes (A-I) in background
-./scripts/run_all.sh
-
-# Logs will appear in logs/<node_id>.log
-tail -f logs/A.log
-tail -f logs/C.log
-```
-
-**What run_all.sh does**:
-- Compiles server code if needed
-- Starts C++ servers for nodes A, B, C, D, E, G (cpp=true)
-- Starts Python servers for nodes F, H, I (python support planned)
-- Each process runs with: `server -n <node_id> -c configs/nodes.json`
-- Writes logs to `logs/<node_id>.log`
-- Stores PIDs in `logs/<node_id>.pid`
-
-### 2. Run a Test Query
-```bash
-# In another terminal, submit a query through gateway (A)
+# Run a query
 ./build/client -c configs/nodes.json
 
-# Expected output:
-# Query successful. Received X chunks.
-# Chunk: Y records (is_last=false)
-#   Plate: ABC123, Date: 03/15/2022, Code: 36
-#   ...
-# Chunk: Z records (is_last=true)
-# Total records: X+Y+Z
+# Stop all nodes
+bash scripts/stop_node.sh
 ```
 
-### 3. Stop All Nodes
-```bash
-./scripts/stop_all.sh
+### Multi-Host (2 or more machines)
 
-# Cleans up PIDs, kills all processes
+**Step 1: Update `configs/nodes.json` on ALL machines**
+
+Set each node's `host` to the IP of the machine it will run on:
+```json
+"A": { "host": "192.168.1.10", "port": 50051, ... },
+"B": { "host": "192.168.1.10", "port": 50052, ... },
+"F": { "host": "192.168.1.20", "port": 50056, ... },
+"G": { "host": "192.168.1.20", "port": 50057, ... }
+```
+
+Also update `shared_data_file` to the CSV path on each machine.
+
+All machines must have the same `nodes.json`.
+
+**Step 2: Start nodes on each machine**
+
+The script auto-detects which nodes belong to this machine by matching the local IP:
+```bash
+# On Machine 1 (192.168.1.10) — start remote workers FIRST
+bash scripts/start_node.sh
+
+# On Machine 2 (192.168.1.20)
+bash scripts/start_node.sh
+
+# Or specify IP manually if auto-detect doesn't work:
+bash scripts/start_node.sh 192.168.1.10
+```
+
+Start machines with worker/leaf nodes first, then the machine with the gateway (A).
+
+**Step 3: Run the client (from the machine where A runs)**
+```bash
+./build/client -c configs/nodes.json
+```
+
+**Step 4: Stop nodes on each machine**
+```bash
+bash scripts/stop_node.sh
+```
+
+### What `start_node.sh` does automatically
+- Detects this machine's IP and finds matching nodes in config
+- Builds C++ server if binary is missing
+- Generates Python proto stubs if missing
+- Installs grpcio if missing
+- Stops any previously running nodes
+- Starts nodes in dependency order: workers first, then relays, then gateway
+- Logs to `logs/<node_id>.log`, PIDs in `logs/<node_id>.pid`
+
+### 3-Machine Example
+
+```
+Machine 1 (192.168.1.10): A, B, C
+Machine 2 (192.168.1.20): D, E, F
+Machine 3 (192.168.1.30): G, H, I
+```
+
+Update `nodes.json` with the IPs above, copy to all 3 machines, then run `bash scripts/start_node.sh` on each. The script handles the rest.
+
+### Legacy Scripts
+
+- `scripts/run_all.sh` — starts all 9 nodes on localhost (single-host only)
+- `scripts/stop_all.sh` — stops all nodes by PID
+
+### Verify connectivity between machines
+```bash
+# From Machine 1, check Machine 2's ports:
+nc -zv 192.168.1.20 50056
+nc -zv 192.168.1.20 50057
 ```
 
 ---
@@ -465,8 +509,10 @@ tail -f logs/C.log
 ├── configs/
 │   └── nodes.json                             # Single shared config for all 9 nodes
 ├── scripts/
-│   ├── run_all.sh                             # Start all node servers
-│   ├── stop_all.sh                            # Stop all servers
+│   ├── start_node.sh                          # Smart startup (single-host + multi-host)
+│   ├── stop_node.sh                           # Stop local nodes
+│   ├── run_all.sh                             # Legacy: start all on localhost
+│   ├── stop_all.sh                            # Legacy: stop all servers
 │   └── gen_proto.sh                           # Regenerate Python protobuf stubs
 ├── build/                                     # CMake output (auto-generated)
 ├── logs/                                      # Node log files + PIDs
@@ -511,22 +557,6 @@ tail -f logs/C.log
 
 ---
 
-## Development Roadmap
-
-| Priority | Feature | Status | Owner |
-|----------|---------|--------|-------|
-| P0 | Build + proto generation | 🟢 Ready | — |
-| P1 | Single worker CSV scan | 🟢 Ready | sharding.hpp |
-| P2 | Gateway neighbor forwarding | 🟡 TODO | server.cpp |
-| P3 | Multi-hop aggregation | 🟡 TODO | server.cpp |
-| P4 | Deduplication at D, G | 🟡 TODO | server.cpp |
-| P5 | violation_code queries | 🟡 TODO | sharding.hpp |
-| P6 | date_range queries | 🟡 TODO | sharding.hpp |
-| P7 | Python node support (F, H) | 🟡 TODO | python/server.py |
-| P8 | Compression + optimization | ⚪️ Backlog | — |
-
----
-
 ## Key Implementation Details
 
 ### Worker Query Processing (`src/common/sharding.hpp`)
@@ -535,62 +565,51 @@ tail -f logs/C.log
 - Opens combined CSV file from config
 - Skips header row
 - Iterates through all rows:
-  1. Parse CSV line into ViolationRecord protobuf
-  2. Extract `Issue Date` field, normalize to YYYYMMDD format
-  3. Check if date falls within node's shard range
-  4. If yes, apply query filters (e.g., plate_id matching)
+  1. Quick date extraction from column 4 for shard filtering
+  2. Normalize date (MM/DD/YYYY → YYYYMMDD) and check shard range
+  3. If in range, parse full CSV line into ViolationRecord protobuf
+  4. Apply query-specific filter via `matches_query()` (supports all 7 query types)
   5. If match, add record to current chunk buffer
   6. When buffer reaches `chunk_size`, yield chunk with `is_last=false`
   7. At end of file, yield final chunk with `is_last=true`
-
-**Why Single CSV?**
-- No replication overhead
-- Simple sharding config (just date ranges)
-- Workers only read their date range → I/O efficient
-- Easy to rebalance shards later
 
 ### Server RPC Handlers (`src/server/server.cpp`)
 
 **SubmitQuery** (Gateway RPC):
 - Called by client on node A
-- Currently: logs query receipt, stub implementation
-- TODO: Forward to all neighbors (B, G, H, I), aggregate results
+- Converts QueryRequest to ForwardRequest, forwards to all neighbors
+- Aggregates chunks from all neighbors into final QueryResponse
 
 **ForwardQuery** (Node-to-Node RPC):
-- Called by upstream node to downstream node
-- Streams chunks back
-- Currently: calls `process_query_on_shard()` to filter local data
-- Returns matching records in chunks
+- Deduplication check via `processed_requests_` set
+- If worker: calls `process_query_on_shard()` on local CSV data
+- If relay/gateway: forwards to all neighbors except sender
+- Aggregates and returns all collected chunks
 
-**CancelQuery** (Async Cancel):
-- Placeholder for canceling in-flight queries
+**CancelQuery**: Placeholder for canceling in-flight queries
 
-**HealthCheck** (Liveness Probe):
-- Returns `healthy=true`
-- Used to verify node is running
+**HealthCheck**: Returns `healthy=true`
 
 ### Deduplication Strategy
 
-Nodes D and G have **two parents** in tree, so may receive same query from two paths:
-- Path 1: A → B → D
-- Path 2: A → B → E → D
+Nodes D and G have two parents in tree:
+- D: reachable via A→B→D and A→B→E→D
+- G: reachable via A→G and A→B→E→G
 
-**Solution** (TODO):
-- Track `seen_request_ids` in each node
-- Skip processing if request already seen
-- Still return results from first processing
+Each node tracks `processed_requests_` (set of request IDs). If a query arrives that was already processed, it returns an empty response immediately.
+
+### Multi-Host Support
+
+Servers bind to `0.0.0.0` (configurable via `listen_host` in JSON) so they accept connections from any machine. Neighbor connections use the `host` field from `nodes.json` — set to `localhost` for single-host, or real IPs for multi-host.
 
 ---
 
-## Known Limitations & TODOs
+## Known Limitations
 
-1. **Gateway Forwarding Not Implemented**: Node A currently logs queries but doesn't forward to neighbors
-2. **Aggregation at Relay Nodes Not Implemented**: B and E don't combine results from downstream
-3. **No Deduplication Yet**: D and G will process same query twice if both parents forward
-4. **Plate ID Only**: violation_code and date_range query types not yet wired up
-5. **Python Server Stub**: F and H not yet implemented (use Python gRPC server)
-6. **No Error Handling**: CSV parsing, network errors assumed won't happen
-7. **Single Machine Testing**: All nodes run on localhost (ready for distribution to 2 machines if needed)
+1. **Sequential forwarding**: Gateway and relays forward to neighbors one at a time (not parallel)
+2. **No cancel propagation**: CancelQuery is a stub, doesn't stop in-flight processing
+3. **Dedup set grows forever**: `processed_requests_` never cleaned up
+4. **No dynamic chunk sizing**: Chunk size is fixed from config
 
 ---
 
@@ -664,37 +683,8 @@ ST       : 112
 The service is defined in [proto/parking_violation_query.proto](proto/parking_violation_query.proto).
 
 Key message types:
-- `QueryRequest` — filter by county, violation code, date range, agency
-- `ViolationRecord` — full typed record (int64 summons, int32 codes, bool flags, doubles for future geo fields)
-- `QueryResponse` — chunked streaming response
-- `DelegationRequest` / `DelegationResponse` — internal inter-process messages
-
----
-
-## Configuration
-
-Each process reads its settings from a JSON config file at startup. **No settings are hardcoded in source code.**
-
-```json
-{
-  "process_id": "C",
-  "role": "worker",
-  "listen_host": "0.0.0.0",
-  "listen_port": 50053,
-  "data_path": "/path/to/parking_violations_2025.csv",
-  "team": "yellow",
-  "is_team_leader": false,
-  "edges": [],
-  "data_partitioning": {
-    "strategy": "county",
-    "owned_counties": ["NY", "MN"]
-  },
-  "chunk_config": {
-    "default_chunk_size": 500,
-    "max_chunk_size": 2000,
-    "min_chunk_size": 100
-  }
-}
-```
-
-For multi-computer deployment, update `host` fields in the `edges` arrays to the actual IP addresses of the remote machines.
+- `QueryRequest` — 7 query types via oneof (plate_id, violation_code, issue_date, plate_violation_history, violation_code_date_range, precinct_vehicle_analysis, unregistered_vehicle_lookup)
+- `ForwardRequest` — same query types + from_node field for tree routing
+- `ViolationRecord` — 35 typed fields (int64 summons, int32 codes/precinct/year, bool unregistered, strings)
+- `Chunk` — batch of records with is_last flag
+- `QueryResponse` / `ForwardResponse` — repeated chunks
