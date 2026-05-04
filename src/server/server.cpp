@@ -14,9 +14,12 @@
 class ParkingServiceImpl final : public parkingviolation::ParkingViolationService::Service {
 public:
     ParkingServiceImpl(const NodeConfig& config) : config_(config) {
-        // Initialize gRPC stubs to all neighbors
         for (const auto& neighbor : config_.neighbors) {
-            std::string neighbor_addr = "localhost:" + std::to_string(get_neighbor_port(neighbor));
+            std::string neighbor_host = config_.neighbor_hosts.count(neighbor)
+                ? config_.neighbor_hosts.at(neighbor) : "localhost";
+            int neighbor_port = config_.neighbor_ports.count(neighbor)
+                ? config_.neighbor_ports.at(neighbor) : 0;
+            std::string neighbor_addr = neighbor_host + ":" + std::to_string(neighbor_port);
             auto channel = grpc::CreateChannel(neighbor_addr, grpc::InsecureChannelCredentials());
             neighbor_stubs_[neighbor] = parkingviolation::ParkingViolationService::NewStub(channel);
             std::cout << "Initialized neighbor " << neighbor << " at " << neighbor_addr << std::endl;
@@ -27,16 +30,6 @@ private:
     NodeConfig config_;
     std::unordered_set<std::string> processed_requests_; // for dedup
     std::map<std::string, std::unique_ptr<parkingviolation::ParkingViolationService::Stub>> neighbor_stubs_;
-
-    // Get port number for a neighbor node
-    int get_neighbor_port(const std::string& neighbor_id) {
-        // Hardcoded mapping (would be better to read from config, but keeping simple for now)
-        std::map<std::string, int> port_map = {
-            {"A", 50051}, {"B", 50052}, {"C", 50053}, {"D", 50054}, {"E", 50055},
-            {"F", 50056}, {"G", 50057}, {"H", 50058}, {"I", 50059}
-        };
-        return port_map[neighbor_id];
-    }
 
     grpc::Status SubmitQuery(grpc::ServerContext* context,
                              const parkingviolation::QueryRequest* request,
@@ -205,7 +198,7 @@ private:
 };
 
 void RunServer(const NodeConfig& config) {
-    std::string server_address = config.host + ":" + std::to_string(config.port);
+    std::string server_address = config.listen_host + ":" + std::to_string(config.port);
     ParkingServiceImpl service(config);
 
     grpc::ServerBuilder builder;

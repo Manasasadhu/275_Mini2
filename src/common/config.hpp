@@ -3,8 +3,9 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include <fstream>
-#include <nlohmann/json.hpp>  // Assume installed
+#include <nlohmann/json.hpp>
 
 struct Shard {
     std::string type;
@@ -14,7 +15,8 @@ struct Shard {
 
 struct NodeConfig {
     std::string node_id;
-    std::string host;
+    std::string host;         // address other nodes use to reach this node
+    std::string listen_host;  // address this node binds to (0.0.0.0 for multi-host)
     int port;
     std::vector<std::string> neighbors;
     std::string language;
@@ -25,6 +27,8 @@ struct NodeConfig {
     std::string global_data_file;
     std::string date_field;
     Shard* shard;  // nullptr if null
+    std::map<std::string, std::string> neighbor_hosts;
+    std::map<std::string, int> neighbor_ports;
 };
 
 NodeConfig load_node_config(const std::string& config_path, const std::string& node_id) {
@@ -42,6 +46,7 @@ NodeConfig load_node_config(const std::string& config_path, const std::string& n
     NodeConfig config;
     config.node_id = node["node_id"];
     config.host = node["host"];
+    config.listen_host = node.value("listen_host", "0.0.0.0");
     config.port = node["port"];
     config.neighbors = node["neighbors"].get<std::vector<std::string>>();
     config.language = node["language"];
@@ -61,6 +66,12 @@ NodeConfig load_node_config(const std::string& config_path, const std::string& n
     } else {
         config.shard = nullptr;
     }
+
+    for (const auto& [nid, ndata] : j["nodes"].items()) {
+        config.neighbor_hosts[nid] = ndata["host"].get<std::string>();
+        config.neighbor_ports[nid] = ndata["port"].get<int>();
+    }
+
     return config;
 }
 

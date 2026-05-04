@@ -16,6 +16,7 @@ class Config:
         node_data = data['nodes'][node_id]
         self.node_id = node_data['node_id']
         self.host = node_data['host']
+        self.listen_host = node_data.get('listen_host', '0.0.0.0')
         self.port = node_data['port']
         self.neighbors = node_data['neighbors']
         self.language = node_data['language']
@@ -29,14 +30,13 @@ class Config:
         else:
             self.data_file = node_data['data_file']
         self.shard = node_data['shard']  # dict or None
+        self.neighbor_hosts = {nid: nd['host'] for nid, nd in data['nodes'].items()}
+        self.neighbor_ports = {nid: nd['port'] for nid, nd in data['nodes'].items()}
 
-    def get_neighbor_port(self, neighbor_id):
-        """Get port for a neighbor node"""
-        port_map = {
-            "A": 50051, "B": 50052, "C": 50053, "D": 50054, "E": 50055,
-            "F": 50056, "G": 50057, "H": 50058, "I": 50059
-        }
-        return port_map.get(neighbor_id, 50051)
+    def get_neighbor_addr(self, neighbor_id):
+        host = self.neighbor_hosts.get(neighbor_id, 'localhost')
+        port = self.neighbor_ports.get(neighbor_id, 50051)
+        return f"{host}:{port}"
 
 class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceServicer):
     def __init__(self, config):
@@ -46,8 +46,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         
         # Initialize gRPC stubs to all neighbors
         for neighbor in config.neighbors:
-            port = config.get_neighbor_port(neighbor)
-            neighbor_addr = f"localhost:{port}"
+            neighbor_addr = config.get_neighbor_addr(neighbor)
             try:
                 channel = grpc.insecure_channel(neighbor_addr)
                 self.neighbor_stubs[neighbor] = parking_violation_query_pb2_grpc.ParkingViolationServiceStub(channel)
@@ -279,7 +278,7 @@ def serve(config_file, node_id):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     parking_violation_query_pb2_grpc.add_ParkingViolationServiceServicer_to_server(
         ParkingService(config), server)
-    server.add_insecure_port(f'{config.host}:{config.port}')
+    server.add_insecure_port(f'{config.listen_host}:{config.port}')
     server.start()
     print(f"[{node_id}] Server started on {config.host}:{config.port}")
     print(f"[{node_id}] Role: {config.role}, Language: {config.language}, neighbors={config.neighbors}")
