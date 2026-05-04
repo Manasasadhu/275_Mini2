@@ -7,7 +7,7 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT_DIR"
 
 LOG_DIR="logs"
-CONFIG="configs/nodes.json"
+CONFIG="${1:-configs/nodes.json}"
 CPP_SERVER="build/server"
 PYTHON_SERVER="python/server/server.py"
 PYTHON_BIN="python3"
