@@ -127,6 +127,7 @@ private:
         else if (request->has_precinct_vehicle_analysis()) query_type = "precinct_vehicle_analysis";
         else if (request->has_unregistered_vehicle_lookup()) query_type = "unregistered_vehicle_lookup";
 
+        auto gateway_start = std::chrono::high_resolution_clock::now();
         std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway received query: request_id=" << req_id
                   << ", type=" << query_type << ", chunk_size=" << request->chunk_size() << std::endl;
 
@@ -156,7 +157,10 @@ private:
         std::string cache_key = build_cache_key(&forward_req);
         std::vector<parkingviolation::Chunk> cached_chunks;
         if (cache_get(cache_key, cached_chunks)) {
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT at gateway for key=" << cache_key << std::endl;
+            auto cache_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now() - gateway_start).count();
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT at gateway for key=" << cache_key
+                      << " (lookup_time=" << cache_ms << " us)" << std::endl;
             {
                 std::lock_guard<std::mutex> lock(results_mutex_);
                 result_store_[req_id] = cached_chunks;
@@ -177,14 +181,17 @@ private:
                 grpc::ClientContext ctx;
                 ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(600));
                 parkingviolation::ForwardResponse fwd_response;
+                auto fwd_start = std::chrono::high_resolution_clock::now();
                 grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, forward_req, &fwd_response);
+                auto fwd_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::high_resolution_clock::now() - fwd_start).count();
                 if (status.ok()) {
                     for (const auto& chunk : fwd_response.chunks()) chunks.push_back(chunk);
                     std::cout << "[" << timestamp() << "][" << config_.node_id << "] Received " << fwd_response.chunks_size()
-                              << " chunks from " << neighbor << std::endl;
+                              << " chunks from " << neighbor << " (rpc_time=" << fwd_ms << " ms)" << std::endl;
                 } else {
                     std::cerr << "[" << timestamp() << "][" << config_.node_id << "] Error forwarding to " << neighbor
-                              << ": " << status.error_message() << std::endl;
+                              << ": " << status.error_message() << " (" << fwd_ms << " ms)" << std::endl;
                 }
                 return chunks;
             }));
@@ -202,10 +209,12 @@ private:
             result_store_[req_id] = all_result_chunks;
         }
 
+        auto gateway_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - gateway_start).count();
         response->set_total_chunks(all_result_chunks.size());
         response->set_request_id(req_id);
         std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway stored " << all_result_chunks.size()
-                  << " chunks for client pull (request_id=" << req_id << ")" << std::endl;
+                  << " chunks for client pull (request_id=" << req_id << ", total_time=" << gateway_ms << " ms)" << std::endl;
         return grpc::Status::OK;
     }
 
@@ -261,6 +270,7 @@ private:
             processed_requests_.insert(req_id);
         }
 
+        auto node_start = std::chrono::high_resolution_clock::now();
         std::cout << "[" << timestamp() << "][" << config_.node_id << "] ForwardQuery received: request_id=" << req_id
                   << ", from_node=" << from_node << ", type=" << query_type
                   << ", neighbors=" << config_.neighbors.size() << std::endl;
@@ -269,7 +279,10 @@ private:
         std::string cache_key = build_cache_key(request);
         std::vector<parkingviolation::Chunk> cached_chunks;
         if (cache_get(cache_key, cached_chunks)) {
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT for key=" << cache_key << std::endl;
+            auto cache_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now() - node_start).count();
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT for key=" << cache_key
+                      << " (lookup_time=" << cache_us << " us)" << std::endl;
             for (const auto& chunk : cached_chunks) response->add_chunks()->CopyFrom(chunk);
             return grpc::Status::OK;
         }
@@ -279,12 +292,16 @@ private:
         // Step 1: Process own shard
         std::vector<parkingviolation::Chunk> all_chunks;
         if (config_.shard && !data_file.empty()) {
+            auto shard_start = std::chrono::high_resolution_clock::now();
             std::cout << "[" << timestamp() << "][" << config_.node_id << "] Processing own shard (worker)" << std::endl;
             int chunk_size = request->chunk_size() > 0 ? request->chunk_size() : config_.chunk_size;
             auto chunks = process_query_on_shard(
                 data_file, config_.shard->start, config_.shard->end, request, chunk_size);
+            auto shard_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::high_resolution_clock::now() - shard_start).count();
             all_chunks.insert(all_chunks.end(), chunks.begin(), chunks.end());
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] Own shard returned " << chunks.size() << " chunks" << std::endl;
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] Own shard returned " << chunks.size()
+                      << " chunks (scan_time=" << shard_ms << " ms)" << std::endl;
         }
 
         // Step 2: Forward to neighbors in parallel (relay/gateway only)
@@ -303,14 +320,17 @@ private:
                     grpc::ClientContext ctx;
                     ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(600));
                     parkingviolation::ForwardResponse fwd_response;
+                    auto fwd_start = std::chrono::high_resolution_clock::now();
                     grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, *request, &fwd_response);
+                    auto fwd_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::high_resolution_clock::now() - fwd_start).count();
                     if (status.ok()) {
                         for (const auto& chunk : fwd_response.chunks()) chunks.push_back(chunk);
                         std::cout << "[" << timestamp() << "][" << config_.node_id << "] Collected " << fwd_response.chunks_size()
-                                  << " chunks from " << neighbor << std::endl;
+                                  << " chunks from " << neighbor << " (rpc_time=" << fwd_ms << " ms)" << std::endl;
                     } else {
                         std::cerr << "[" << timestamp() << "][" << config_.node_id << "] Error forwarding to " << neighbor
-                                  << ": " << status.error_message() << std::endl;
+                                  << ": " << status.error_message() << " (" << fwd_ms << " ms)" << std::endl;
                     }
                     return chunks;
                 }));
@@ -324,14 +344,16 @@ private:
 
         // Store in cache
         cache_put(cache_key, all_chunks);
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE STORE for key=" << cache_key << std::endl;
+
+        auto node_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - node_start).count();
 
         // Step 3: Return aggregated results
         for (const auto& chunk : all_chunks) {
             response->add_chunks()->CopyFrom(chunk);
         }
         std::cout << "[" << timestamp() << "][" << config_.node_id << "] Returning " << all_chunks.size()
-                  << " total chunks for request " << req_id << std::endl;
+                  << " total chunks for request " << req_id << " (node_time=" << node_ms << " ms)" << std::endl;
         return grpc::Status::OK;
     }
 

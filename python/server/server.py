@@ -10,6 +10,7 @@ import argparse
 import sys
 import logging
 import threading
+import time
 
 logging.basicConfig(
     level=logging.INFO,
@@ -158,10 +159,12 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
             fwd_request.unregistered_vehicle_lookup.CopyFrom(request.unregistered_vehicle_lookup)
 
         # Check gateway-level cache
+        gateway_start = time.perf_counter()
         cache_key = build_cache_key(fwd_request)
         cached = self.cache.get(cache_key)
         if cached is not None:
-            logger.info(f"[{self.config.node_id}] CACHE HIT at gateway for key={cache_key}")
+            cache_us = int((time.perf_counter() - gateway_start) * 1_000_000)
+            logger.info(f"[{self.config.node_id}] CACHE HIT at gateway for key={cache_key} (lookup_time={cache_us} us)")
             with self.result_store_lock:
                 self.result_store[request.request_id] = cached
             response = parking_violation_query_pb2.QueryResponse()
@@ -176,9 +179,11 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         # Forward to all neighbors
         for neighbor in self.config.neighbors:
             try:
+                fwd_start = time.perf_counter()
                 fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(fwd_request, timeout=120)
+                fwd_ms = int((time.perf_counter() - fwd_start) * 1000)
                 all_chunks.extend(fwd_response.chunks)
-                logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
+                logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor} (rpc_time={fwd_ms} ms)")
             except Exception as e:
                 logger.error(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
 
@@ -187,10 +192,11 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         with self.result_store_lock:
             self.result_store[request.request_id] = all_chunks
 
+        gateway_ms = int((time.perf_counter() - gateway_start) * 1000)
         response = parking_violation_query_pb2.QueryResponse()
         response.total_chunks = len(all_chunks)
         response.request_id = request.request_id
-        logger.info(f"[{self.config.node_id}] Gateway stored {len(all_chunks)} chunks for client pull (request_id={request.request_id})")
+        logger.info(f"[{self.config.node_id}] Gateway stored {len(all_chunks)} chunks for client pull (request_id={request.request_id}, total_time={gateway_ms} ms)")
         return response
 
     def ForwardQuery(self, request, context):
@@ -204,13 +210,15 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
             return parking_violation_query_pb2.ForwardResponse()
         self.processed_requests.add(req_id)
 
+        node_start = time.perf_counter()
         logger.info(f"[{self.config.node_id}] ForwardQuery received: request_id={req_id}, from_node={from_node}, type={query_type}")
 
         # Check node-level cache
         cache_key = build_cache_key(request)
         cached = self.cache.get(cache_key)
         if cached is not None:
-            logger.info(f"[{self.config.node_id}] CACHE HIT for key={cache_key}")
+            cache_us = int((time.perf_counter() - node_start) * 1_000_000)
+            logger.info(f"[{self.config.node_id}] CACHE HIT for key={cache_key} (lookup_time={cache_us} us)")
             response = parking_violation_query_pb2.ForwardResponse()
             response.chunks.extend(cached)
             return response
@@ -224,22 +232,27 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     logger.info(f"[{self.config.node_id}] Skipping {neighbor} (query came from here)")
                     continue
                 try:
+                    fwd_start = time.perf_counter()
                     fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(request, timeout=600)
+                    fwd_ms = int((time.perf_counter() - fwd_start) * 1000)
                     response.chunks.extend(fwd_response.chunks)
-                    logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
+                    logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor} (rpc_time={fwd_ms} ms)")
                 except Exception as e:
                     logger.error(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
 
         # Process own shard if this node is a worker
         if self.config.shard:
+            shard_start = time.perf_counter()
             logger.info(f"[{self.config.node_id}] Processing own shard")
             chunks = self.process_query_on_shard(request)
+            shard_ms = int((time.perf_counter() - shard_start) * 1000)
             response.chunks.extend(chunks)
-            logger.info(f"[{self.config.node_id}] Own shard returned {len(chunks)} chunks")
+            logger.info(f"[{self.config.node_id}] Own shard returned {len(chunks)} chunks (scan_time={shard_ms} ms)")
 
         # Store in cache
         self.cache.put(cache_key, list(response.chunks))
-        logger.info(f"[{self.config.node_id}] CACHE STORE for key={cache_key}")
+        node_ms = int((time.perf_counter() - node_start) * 1000)
+        logger.info(f"[{self.config.node_id}] Returning {len(response.chunks)} chunks for request {req_id} (node_time={node_ms} ms)")
 
         return response
 
