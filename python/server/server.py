@@ -176,16 +176,22 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
 
         all_chunks = []
 
-        # Forward to all neighbors
-        for neighbor in self.config.neighbors:
+        # Forward to all neighbors in parallel
+        def forward_to_neighbor(neighbor):
             try:
                 fwd_start = time.perf_counter()
                 fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(fwd_request, timeout=120)
                 fwd_ms = int((time.perf_counter() - fwd_start) * 1000)
-                all_chunks.extend(fwd_response.chunks)
                 logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor} (rpc_time={fwd_ms} ms)")
+                return list(fwd_response.chunks)
             except Exception as e:
                 logger.error(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
+                return []
+
+        with futures.ThreadPoolExecutor(max_workers=len(self.config.neighbors)) as executor:
+            futs = {executor.submit(forward_to_neighbor, n): n for n in self.config.neighbors}
+            for fut in futures.as_completed(futs):
+                all_chunks.extend(fut.result())
 
         # Store in gateway cache and result store
         self.cache.put(cache_key, all_chunks)
@@ -225,20 +231,27 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
 
         response = parking_violation_query_pb2.ForwardResponse()
 
-        # Forward to neighbors except the one that sent it (relay/gateway only)
+        # Forward to neighbors in parallel except the one that sent it (relay/gateway only)
         if self.config.role in ('relay', 'gateway'):
-            for neighbor in self.config.neighbors:
-                if neighbor == from_node:
-                    logger.info(f"[{self.config.node_id}] Skipping {neighbor} (query came from here)")
-                    continue
+            downstream = [n for n in self.config.neighbors if n != from_node]
+            for skipped in [n for n in self.config.neighbors if n == from_node]:
+                logger.info(f"[{self.config.node_id}] Skipping {skipped} (query came from here)")
+
+            def forward_downstream(neighbor):
                 try:
                     fwd_start = time.perf_counter()
                     fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(request, timeout=600)
                     fwd_ms = int((time.perf_counter() - fwd_start) * 1000)
-                    response.chunks.extend(fwd_response.chunks)
                     logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor} (rpc_time={fwd_ms} ms)")
+                    return list(fwd_response.chunks)
                 except Exception as e:
                     logger.error(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
+                    return []
+
+            with futures.ThreadPoolExecutor(max_workers=len(downstream)) as executor:
+                futs = {executor.submit(forward_downstream, n): n for n in downstream}
+                for fut in futures.as_completed(futs):
+                    response.chunks.extend(fut.result())
 
         # Process own shard if this node is a worker
         if self.config.shard:
