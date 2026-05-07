@@ -6,6 +6,8 @@
 #include <mutex>
 #include <unordered_set>
 #include <vector>
+#include <iomanip>
+#include <ctime>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
@@ -28,7 +30,7 @@ public:
             args.SetMaxSendMessageSize(-1);
             auto channel = grpc::CreateCustomChannel(neighbor_addr, grpc::InsecureChannelCredentials(), args);
             neighbor_stubs_[neighbor] = parkingviolation::ParkingViolationService::NewStub(channel);
-            std::cout << "Initialized neighbor " << neighbor << " at " << neighbor_addr << std::endl;
+            std::cout << "[" << timestamp() << "] Initialized neighbor " << neighbor << " at " << neighbor_addr << std::endl;
         }
     }
 
@@ -55,7 +57,7 @@ private:
         else if (request->has_precinct_vehicle_analysis()) query_type = "precinct_vehicle_analysis";
         else if (request->has_unregistered_vehicle_lookup()) query_type = "unregistered_vehicle_lookup";
 
-        std::cout << "[" << config_.node_id << "] Gateway received query: request_id=" << req_id
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway received query: request_id=" << req_id
                   << ", type=" << query_type << ", chunk_size=" << request->chunk_size() << std::endl;
 
         // Convert QueryRequest to ForwardRequest
@@ -93,10 +95,10 @@ private:
                 grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, forward_req, &fwd_response);
                 if (status.ok()) {
                     for (const auto& chunk : fwd_response.chunks()) chunks.push_back(chunk);
-                    std::cout << "[" << config_.node_id << "] Received " << fwd_response.chunks_size()
+                    std::cout << "[" << timestamp() << "][" << config_.node_id << "] Received " << fwd_response.chunks_size()
                               << " chunks from " << neighbor << std::endl;
                 } else {
-                    std::cerr << "[" << config_.node_id << "] Error forwarding to " << neighbor
+                    std::cerr << "[" << timestamp() << "][" << config_.node_id << "] Error forwarding to " << neighbor
                               << ": " << status.error_message() << std::endl;
                 }
                 return chunks;
@@ -106,7 +108,7 @@ private:
         for (auto& f : futures) {
             for (const auto& chunk : f.get()) response->add_chunks()->CopyFrom(chunk);
         }
-        std::cout << "[" << config_.node_id << "] Gateway response contains " << response->chunks_size()
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway response contains " << response->chunks_size()
                   << " total chunks" << std::endl;
         return grpc::Status::OK;
     }
@@ -128,13 +130,13 @@ private:
         {
             std::lock_guard<std::mutex> lock(dedup_mutex_);
             if (processed_requests_.count(req_id)) {
-                std::cout << "[" << config_.node_id << "] Query " << req_id << " already processed, skipping" << std::endl;
+                std::cout << "[" << timestamp() << "][" << config_.node_id << "] Query " << req_id << " already processed, skipping" << std::endl;
                 return grpc::Status::OK;
             }
             processed_requests_.insert(req_id);
         }
 
-        std::cout << "[" << config_.node_id << "] ForwardQuery received: request_id=" << req_id
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] ForwardQuery received: request_id=" << req_id
                   << ", from_node=" << from_node << ", type=" << query_type
                   << ", neighbors=" << config_.neighbors.size() << std::endl;
 
@@ -143,12 +145,12 @@ private:
         // Step 1: Process own shard
         std::vector<parkingviolation::Chunk> all_chunks;
         if (config_.shard && !data_file.empty()) {
-            std::cout << "[" << config_.node_id << "] Processing own shard (worker)" << std::endl;
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] Processing own shard (worker)" << std::endl;
             int chunk_size = request->chunk_size() > 0 ? request->chunk_size() : config_.chunk_size;
             auto chunks = process_query_on_shard(
                 data_file, config_.shard->start, config_.shard->end, request, chunk_size);
             all_chunks.insert(all_chunks.end(), chunks.begin(), chunks.end());
-            std::cout << "[" << config_.node_id << "] Own shard returned " << chunks.size() << " chunks" << std::endl;
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] Own shard returned " << chunks.size() << " chunks" << std::endl;
         }
 
         // Step 2: Forward to neighbors in parallel (relay/gateway only)
@@ -158,10 +160,10 @@ private:
 
             for (const auto& neighbor : config_.neighbors) {
                 if (neighbor == from_node) {
-                    std::cout << "[" << config_.node_id << "] Skipping " << neighbor << " (query came from here)" << std::endl;
+                    std::cout << "[" << timestamp() << "][" << config_.node_id << "] Skipping " << neighbor << " (query came from here)" << std::endl;
                     continue;
                 }
-                std::cout << "[" << config_.node_id << "] Forwarding to neighbor " << neighbor << std::endl;
+                std::cout << "[" << timestamp() << "][" << config_.node_id << "] Forwarding to neighbor " << neighbor << std::endl;
                 futures.push_back(std::async(std::launch::async, [this, neighbor, request]() {
                     ChunkVec chunks;
                     grpc::ClientContext ctx;
@@ -170,10 +172,10 @@ private:
                     grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, *request, &fwd_response);
                     if (status.ok()) {
                         for (const auto& chunk : fwd_response.chunks()) chunks.push_back(chunk);
-                        std::cout << "[" << config_.node_id << "] Collected " << fwd_response.chunks_size()
+                        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Collected " << fwd_response.chunks_size()
                                   << " chunks from " << neighbor << std::endl;
                     } else {
-                        std::cerr << "[" << config_.node_id << "] Error forwarding to " << neighbor
+                        std::cerr << "[" << timestamp() << "][" << config_.node_id << "] Error forwarding to " << neighbor
                                   << ": " << status.error_message() << std::endl;
                     }
                     return chunks;
@@ -190,7 +192,7 @@ private:
         for (const auto& chunk : all_chunks) {
             response->add_chunks()->CopyFrom(chunk);
         }
-        std::cout << "[" << config_.node_id << "] Returning " << all_chunks.size()
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Returning " << all_chunks.size()
                   << " total chunks for request " << req_id << std::endl;
         return grpc::Status::OK;
     }
@@ -221,7 +223,7 @@ void RunServer(const NodeConfig& config) {
     builder.RegisterService(&service);
 
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    std::cout << "Server listening on " << server_address << std::endl;
+    std::cout << "[" << timestamp() << "] Server listening on " << server_address << std::endl;
     server->Wait();
 }
 
