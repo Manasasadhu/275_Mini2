@@ -4,6 +4,7 @@ package parkingviolation;
 
 service ParkingViolationService {
     rpc SubmitQuery(QueryRequest) returns (QueryResponse) {}
+    rpc FetchChunks(FetchChunksRequest) returns (FetchChunksResponse) {}
     rpc ForwardQuery(ForwardRequest) returns (ForwardResponse) {}
     rpc CancelQuery(CancelRequest) returns (CancelResponse) {}
     rpc HealthCheck(HealthRequest) returns (HealthResponse) {}
@@ -59,6 +60,20 @@ message QueryRequest {
 
 message QueryResponse {
     repeated Chunk chunks = 1;
+    int32 total_chunks = 2;
+    string request_id = 3;
+}
+
+message FetchChunksRequest {
+    string request_id = 1;
+    int32 offset = 2;
+    int32 limit = 3;
+}
+
+message FetchChunksResponse {
+    repeated Chunk chunks = 1;
+    int32 total_chunks = 2;
+    bool has_more = 3;
 }
 
 message Chunk {

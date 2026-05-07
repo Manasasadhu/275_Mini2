@@ -79,6 +79,10 @@ private:
     std::unordered_map<std::string, std::pair<std::vector<parkingviolation::Chunk>,
                        std::list<std::string>::iterator>> cache_;
 
+    // Result store for client-side chunk retrieval (gateway only)
+    std::mutex results_mutex_;
+    std::unordered_map<std::string, std::vector<parkingviolation::Chunk>> result_store_;
+
     void cache_put(const std::string& key, const std::vector<parkingviolation::Chunk>& chunks) {
         std::lock_guard<std::mutex> lock(cache_mutex_);
         auto it = cache_.find(key);
@@ -153,7 +157,12 @@ private:
         std::vector<parkingviolation::Chunk> cached_chunks;
         if (cache_get(cache_key, cached_chunks)) {
             std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT at gateway for key=" << cache_key << std::endl;
-            for (const auto& chunk : cached_chunks) response->add_chunks()->CopyFrom(chunk);
+            {
+                std::lock_guard<std::mutex> lock(results_mutex_);
+                result_store_[req_id] = cached_chunks;
+            }
+            response->set_total_chunks(cached_chunks.size());
+            response->set_request_id(req_id);
             return grpc::Status::OK;
         }
         std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE MISS at gateway, forwarding query" << std::endl;
@@ -185,13 +194,47 @@ private:
         for (auto& f : futures) {
             for (const auto& chunk : f.get()) all_result_chunks.push_back(chunk);
         }
-        for (const auto& chunk : all_result_chunks) response->add_chunks()->CopyFrom(chunk);
 
-        // Store in gateway cache
+        // Store in gateway cache and result store for client pull
         cache_put(cache_key, all_result_chunks);
+        {
+            std::lock_guard<std::mutex> lock(results_mutex_);
+            result_store_[req_id] = all_result_chunks;
+        }
 
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway response contains " << response->chunks_size()
-                  << " total chunks (cached)" << std::endl;
+        response->set_total_chunks(all_result_chunks.size());
+        response->set_request_id(req_id);
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway stored " << all_result_chunks.size()
+                  << " chunks for client pull (request_id=" << req_id << ")" << std::endl;
+        return grpc::Status::OK;
+    }
+
+    grpc::Status FetchChunks(grpc::ServerContext* context,
+                             const parkingviolation::FetchChunksRequest* request,
+                             parkingviolation::FetchChunksResponse* response) override {
+        std::string req_id = request->request_id();
+        int offset = request->offset();
+        int limit = request->limit();
+
+        std::lock_guard<std::mutex> lock(results_mutex_);
+        auto it = result_store_.find(req_id);
+        if (it == result_store_.end()) {
+            return grpc::Status(grpc::StatusCode::NOT_FOUND, "No results for request_id=" + req_id);
+        }
+
+        const auto& chunks = it->second;
+        int total = chunks.size();
+        response->set_total_chunks(total);
+
+        int end = std::min(offset + limit, total);
+        for (int i = offset; i < end; i++) {
+            response->add_chunks()->CopyFrom(chunks[i]);
+        }
+        response->set_has_more(end < total);
+
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] FetchChunks: request_id=" << req_id
+                  << " offset=" << offset << " limit=" << limit << " returned=" << (end - offset)
+                  << " has_more=" << (end < total) << std::endl;
         return grpc::Status::OK;
     }
 
