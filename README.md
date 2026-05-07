@@ -105,33 +105,97 @@ bash scripts/start_local.sh configs/nodes_single.json
 bash scripts/stop_local.sh
 ```
 
-### Multi-Host (2 machines via switch)
+### Multi-Host (2 machines via network switch)
 
-**Network setup (one-time per session):**
+#### Hardware Setup
 
-```bash
-# On Machine 1:
-sudo ip addr add 172.16.0.200/24 dev <ethernet-interface>
+You need:
+- 1 unmanaged network switch (any port count)
+- 2 ethernet cables
 
-# On Machine 2:
-sudo ip addr add 172.16.0.154/24 dev <ethernet-interface>
-
-# Verify:
-ping 172.16.0.200   # from Machine 2
-ping 172.16.0.154   # from Machine 1
+```
+[Machine 1] ──ethernet──> [SWITCH] <──ethernet── [Machine 2]
+ (172.16.0.200)                                   (172.16.0.154)
+ Nodes A, B, C, D, E                              Nodes F, G, H, I
 ```
 
-Find your ethernet interface name with `ip link show` (look for `enp*` or `eth*`, not `lo` or `wlan`).
+1. Power on the switch
+2. Connect Machine 1 to any switch port via ethernet cable
+3. Connect Machine 2 to another switch port via ethernet cable
+4. Verify link LEDs light up on the switch for both ports
 
-**Start nodes:**
+#### Network Configuration (one-time per session)
+
+The two machines communicate over a private `172.16.0.0/24` network. WiFi/internet remains unaffected.
+
+**On Machine 1 (gateway + relays):**
 
 ```bash
-# On Machine 2 (172.16.0.154) — start workers first:
+# Find your ethernet interface name
+ip link show
+# Look for enp*, eth*, or eno* (NOT lo, wlan, or docker)
+
+# Assign static IP
+sudo ip addr add 172.16.0.200/24 dev <ethernet-interface>
+
+# Verify interface is UP
+ip link show <ethernet-interface>
+# Should show: state UP
+```
+
+**On Machine 2 (workers):**
+
+```bash
+# Find ethernet interface
+ip link show
+
+# Assign static IP
+sudo ip addr add 172.16.0.154/24 dev <ethernet-interface>
+```
+
+**Verify connectivity:**
+
+```bash
+# From Machine 1:
+ping 172.16.0.154
+
+# From Machine 2:
+ping 172.16.0.200
+```
+
+If ping fails:
+- Check switch has power and link LEDs are on
+- Re-seat ethernet cables on both ends
+- Try a different switch port or cable
+- Run `ip link set <interface> up` if state shows DOWN
+
+#### Code Setup (both machines)
+
+```bash
+git fetch origin
+git checkout feat/multi-host-v2
+./build.sh
+
+# Python dependencies (for machines running Python nodes)
+python3 -m venv venv
+source venv/bin/activate
+pip install grpcio grpcio-tools
+bash scripts/gen_proto.sh
+```
+
+Ensure `combined_parking_violations.csv` is present in the project root on both machines.
+
+#### Start Nodes
+
+```bash
+# On Machine 2 (172.16.0.154) — start workers FIRST:
 bash scripts/start_local.sh configs/nodes_multi.json 172.16.0.154
 
 # On Machine 1 (172.16.0.200) — start gateway + relays:
 bash scripts/start_local.sh configs/nodes_multi.json 172.16.0.200
 ```
+
+Start workers before the gateway so that when A tries to connect to its neighbors, they're already listening.
 
 **Run queries (from Machine 1):**
 
