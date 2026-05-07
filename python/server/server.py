@@ -4,10 +4,12 @@ import parking_violation_query_pb2
 import parking_violation_query_pb2_grpc
 import json
 import csv
+from collections import OrderedDict
 from datetime import datetime
 import argparse
 import sys
 import logging
+import threading
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,11 +57,63 @@ class Config:
         port = self.neighbor_ports.get(neighbor_id, 50051)
         return f"{host}:{port}"
 
+MAX_CACHE_ENTRIES = 64
+
+def build_cache_key(request):
+    query_type = request.WhichOneof('query')
+    if query_type == 'plate_id':
+        key = f"plate:{request.plate_id}"
+    elif query_type == 'violation_code':
+        key = f"vc:{request.violation_code}"
+    elif query_type == 'issue_date':
+        key = f"date:{request.issue_date.start}~{request.issue_date.end}"
+    elif query_type == 'plate_violation_history':
+        q = request.plate_violation_history
+        key = f"pvh:{q.plate_id}:{q.violation_code}:{q.date_range.start}~{q.date_range.end}:{q.registration_state}"
+    elif query_type == 'violation_code_date_range':
+        q = request.violation_code_date_range
+        key = f"vcdr:{q.violation_code}:{q.date_range.start}~{q.date_range.end}"
+    elif query_type == 'precinct_vehicle_analysis':
+        q = request.precinct_vehicle_analysis
+        key = f"pva:{q.county}:{q.precinct}:{q.vehicle_year_min}~{q.vehicle_year_max}:{q.body_type}"
+    elif query_type == 'unregistered_vehicle_lookup':
+        q = request.unregistered_vehicle_lookup
+        key = f"uvl:{int(q.unregistered)}:{q.state}:{q.feet_from_curb_min}"
+    else:
+        key = "unknown"
+    key += f"|cs:{request.chunk_size}"
+    return key
+
+
+class LRUCache:
+    def __init__(self, max_size=MAX_CACHE_ENTRIES):
+        self.max_size = max_size
+        self.cache = OrderedDict()
+        self.lock = threading.Lock()
+
+    def get(self, key):
+        with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            return None
+
+    def put(self, key, value):
+        with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+            else:
+                if len(self.cache) >= self.max_size:
+                    self.cache.popitem(last=False)
+            self.cache[key] = value
+
+
 class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceServicer):
     def __init__(self, config):
         self.config = config
         self.processed_requests = set()  # for dedup
         self.neighbor_stubs = {}  # gRPC stubs to neighbors
+        self.cache = LRUCache()
 
         # Initialize gRPC stubs to all neighbors
         msg_options = [('grpc.max_receive_message_length', -1), ('grpc.max_send_message_length', -1)]
@@ -80,39 +134,52 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         logger.info(f"[{self.config.node_id}] Gateway received query: request_id={request.request_id}, type={query_type}, chunk_size={request.chunk_size}")
         logger.info(f"[{self.config.node_id}] Gateway neighbors={self.config.neighbors}")
 
+        # Build forward request to compute cache key
+        fwd_request = parking_violation_query_pb2.ForwardRequest(
+            request_id=request.request_id,
+            from_node=self.config.node_id,
+            chunk_size=request.chunk_size
+        )
+        if request.HasField('plate_id'):
+            fwd_request.plate_id = request.plate_id
+        elif request.HasField('violation_code'):
+            fwd_request.violation_code = request.violation_code
+        elif request.HasField('issue_date'):
+            fwd_request.issue_date.CopyFrom(request.issue_date)
+        elif request.HasField('plate_violation_history'):
+            fwd_request.plate_violation_history.CopyFrom(request.plate_violation_history)
+        elif request.HasField('violation_code_date_range'):
+            fwd_request.violation_code_date_range.CopyFrom(request.violation_code_date_range)
+        elif request.HasField('precinct_vehicle_analysis'):
+            fwd_request.precinct_vehicle_analysis.CopyFrom(request.precinct_vehicle_analysis)
+        elif request.HasField('unregistered_vehicle_lookup'):
+            fwd_request.unregistered_vehicle_lookup.CopyFrom(request.unregistered_vehicle_lookup)
+
+        # Check gateway-level cache
+        cache_key = build_cache_key(fwd_request)
+        cached = self.cache.get(cache_key)
+        if cached is not None:
+            logger.info(f"[{self.config.node_id}] CACHE HIT at gateway for key={cache_key}")
+            response = parking_violation_query_pb2.QueryResponse()
+            response.chunks.extend(cached)
+            return response
+
+        logger.info(f"[{self.config.node_id}] CACHE MISS at gateway, forwarding query")
+
         response = parking_violation_query_pb2.QueryResponse()
 
         # Forward to all neighbors
         for neighbor in self.config.neighbors:
             try:
-                fwd_request = parking_violation_query_pb2.ForwardRequest(
-                    request_id=request.request_id,
-                    from_node=self.config.node_id,
-                    chunk_size=request.chunk_size
-                )
-
-                # Copy the query type
-                if request.HasField('plate_id'):
-                    fwd_request.plate_id = request.plate_id
-                elif request.HasField('violation_code'):
-                    fwd_request.violation_code = request.violation_code
-                elif request.HasField('issue_date'):
-                    fwd_request.issue_date.CopyFrom(request.issue_date)
-                elif request.HasField('plate_violation_history'):
-                    fwd_request.plate_violation_history.CopyFrom(request.plate_violation_history)
-                elif request.HasField('violation_code_date_range'):
-                    fwd_request.violation_code_date_range.CopyFrom(request.violation_code_date_range)
-                elif request.HasField('precinct_vehicle_analysis'):
-                    fwd_request.precinct_vehicle_analysis.CopyFrom(request.precinct_vehicle_analysis)
-                elif request.HasField('unregistered_vehicle_lookup'):
-                    fwd_request.unregistered_vehicle_lookup.CopyFrom(request.unregistered_vehicle_lookup)
-
                 fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(fwd_request, timeout=120)
                 for chunk in fwd_response.chunks:
                     response.chunks.append(chunk)
                 logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
             except Exception as e:
                 logger.error(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
+
+        # Store in gateway cache
+        self.cache.put(cache_key, list(response.chunks))
 
         return response
 
@@ -128,6 +195,15 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         self.processed_requests.add(req_id)
 
         logger.info(f"[{self.config.node_id}] ForwardQuery received: request_id={req_id}, from_node={from_node}, type={query_type}")
+
+        # Check node-level cache
+        cache_key = build_cache_key(request)
+        cached = self.cache.get(cache_key)
+        if cached is not None:
+            logger.info(f"[{self.config.node_id}] CACHE HIT for key={cache_key}")
+            response = parking_violation_query_pb2.ForwardResponse()
+            response.chunks.extend(cached)
+            return response
 
         response = parking_violation_query_pb2.ForwardResponse()
 
@@ -150,6 +226,10 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
             chunks = self.process_query_on_shard(request)
             response.chunks.extend(chunks)
             logger.info(f"[{self.config.node_id}] Own shard returned {len(chunks)} chunks")
+
+        # Store in cache
+        self.cache.put(cache_key, list(response.chunks))
+        logger.info(f"[{self.config.node_id}] CACHE STORE for key={cache_key}")
 
         return response
 
