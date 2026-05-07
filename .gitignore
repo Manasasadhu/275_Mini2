@@ -1,5 +1,7 @@
 build/
 logs/
+*.csv
+venv/
 __pycache__/
 python/server/*_pb2.py
 python/server/*_pb2_grpc.py
