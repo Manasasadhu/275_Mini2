@@ -3,6 +3,7 @@
 #include <string>
 #include <chrono>
 #include <future>
+#include <thread>
 #include <mutex>
 #include <unordered_set>
 #include <unordered_map>
@@ -71,6 +72,8 @@ private:
     NodeConfig config_;
     std::mutex dedup_mutex_;
     std::unordered_set<std::string> processed_requests_;
+    std::mutex cancel_mutex_;
+    std::unordered_set<std::string> cancelled_requests_;
     std::map<std::string, std::unique_ptr<parkingviolation::ParkingViolationService::Stub>> neighbor_stubs_;
 
     // LRU cache: key -> chunks
@@ -261,6 +264,11 @@ private:
         else if (request->has_precinct_vehicle_analysis()) query_type = "precinct_vehicle_analysis";
         else if (request->has_unregistered_vehicle_lookup()) query_type = "unregistered_vehicle_lookup";
 
+        if (is_cancelled(req_id)) {
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] Query " << req_id << " is cancelled, aborting" << std::endl;
+            return grpc::Status(grpc::StatusCode::CANCELLED, "Request cancelled");
+        }
+
         {
             std::lock_guard<std::mutex> lock(dedup_mutex_);
             if (processed_requests_.count(req_id)) {
@@ -360,8 +368,42 @@ private:
     grpc::Status CancelQuery(grpc::ServerContext* context,
                              const parkingviolation::CancelRequest* request,
                              parkingviolation::CancelResponse* response) override {
+        std::string req_id = request->request_id();
+        {
+            std::lock_guard<std::mutex> lock(cancel_mutex_);
+            if (cancelled_requests_.count(req_id)) {
+                response->set_success(true);
+                return grpc::Status::OK;
+            }
+            cancelled_requests_.insert(req_id);
+        }
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] CancelQuery: cancelling request " << req_id << std::endl;
+
+        // Remove from result store if present
+        {
+            std::lock_guard<std::mutex> lock(results_mutex_);
+            result_store_.erase(req_id);
+        }
+
+        // Propagate cancellation to all neighbors
+        for (const auto& neighbor : config_.neighbors) {
+            std::thread([this, neighbor, req_id]() {
+                grpc::ClientContext ctx;
+                ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+                parkingviolation::CancelRequest cancel_req;
+                cancel_req.set_request_id(req_id);
+                parkingviolation::CancelResponse cancel_resp;
+                neighbor_stubs_[neighbor]->CancelQuery(&ctx, cancel_req, &cancel_resp);
+            }).detach();
+        }
+
         response->set_success(true);
         return grpc::Status::OK;
+    }
+
+    bool is_cancelled(const std::string& req_id) {
+        std::lock_guard<std::mutex> lock(cancel_mutex_);
+        return cancelled_requests_.count(req_id) > 0;
     }
 
     grpc::Status HealthCheck(grpc::ServerContext* context,

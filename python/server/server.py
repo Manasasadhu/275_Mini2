@@ -117,6 +117,8 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         self.cache = LRUCache()
         self.result_store = {}  # request_id -> list of chunks (for client pull)
         self.result_store_lock = threading.Lock()
+        self.cancelled_requests = set()
+        self.cancel_lock = threading.Lock()
 
         # Initialize gRPC stubs to all neighbors
         msg_options = [('grpc.max_receive_message_length', -1), ('grpc.max_send_message_length', -1)]
@@ -209,6 +211,12 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         req_id = request.request_id
         from_node = request.from_node
         query_type = request.WhichOneof('query') or 'unknown'
+
+        # Check if cancelled
+        with self.cancel_lock:
+            if req_id in self.cancelled_requests:
+                logger.info(f"[{self.config.node_id}] Query {req_id} is cancelled, aborting")
+                context.abort(grpc.StatusCode.CANCELLED, "Request cancelled")
 
         # Deduplication
         if req_id in self.processed_requests:
@@ -434,6 +442,29 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         return response
 
     def CancelQuery(self, request, context):
+        req_id = request.request_id
+        with self.cancel_lock:
+            if req_id in self.cancelled_requests:
+                return parking_violation_query_pb2.CancelResponse(success=True)
+            self.cancelled_requests.add(req_id)
+
+        logger.info(f"[{self.config.node_id}] CancelQuery: cancelling request {req_id}")
+
+        # Remove from result store
+        with self.result_store_lock:
+            self.result_store.pop(req_id, None)
+
+        # Propagate cancellation to all neighbors
+        def propagate(neighbor):
+            try:
+                cancel_req = parking_violation_query_pb2.CancelRequest(request_id=req_id)
+                self.neighbor_stubs[neighbor].CancelQuery(cancel_req, timeout=5)
+            except Exception:
+                pass
+
+        for neighbor in self.config.neighbors:
+            threading.Thread(target=propagate, args=(neighbor,), daemon=True).start()
+
         return parking_violation_query_pb2.CancelResponse(success=True)
 
     def HealthCheck(self, request, context):
