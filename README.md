@@ -37,11 +37,11 @@ Tree edges: AB, BC, BD, BE, EF, ED, EG, AH, AG, AI
 ### Multi-Host Deployment
 
 ```
-Machine 1 (10.0.0.200): Nodes A, B, C, D, E
-Machine 2 (10.0.0.154): Nodes F, G, H, I
+Machine 1 (172.16.0.200): Nodes A, B, C, D, E
+Machine 2 (172.16.0.154): Nodes F, G, H, I
 ```
 
-Connected via ethernet switch on a private 10.0.0.0/24 network.
+Connected via ethernet switch on a private 172.16.0.0/24 network.
 
 ---
 
@@ -111,14 +111,14 @@ bash scripts/stop_local.sh
 
 ```bash
 # On Machine 1:
-sudo ip addr add 10.0.0.200/24 dev <ethernet-interface>
+sudo ip addr add 172.16.0.200/24 dev <ethernet-interface>
 
 # On Machine 2:
-sudo ip addr add 10.0.0.154/24 dev <ethernet-interface>
+sudo ip addr add 172.16.0.154/24 dev <ethernet-interface>
 
 # Verify:
-ping 10.0.0.200   # from Machine 2
-ping 10.0.0.154   # from Machine 1
+ping 172.16.0.200   # from Machine 2
+ping 172.16.0.154   # from Machine 1
 ```
 
 Find your ethernet interface name with `ip link show` (look for `enp*` or `eth*`, not `lo` or `wlan`).
@@ -126,11 +126,11 @@ Find your ethernet interface name with `ip link show` (look for `enp*` or `eth*`
 **Start nodes:**
 
 ```bash
-# On Machine 2 (10.0.0.154) — start workers first:
-bash scripts/start_local.sh configs/nodes_multi.json 10.0.0.154
+# On Machine 2 (172.16.0.154) — start workers first:
+bash scripts/start_local.sh configs/nodes_multi.json 172.16.0.154
 
-# On Machine 1 (10.0.0.200) — start gateway + relays:
-bash scripts/start_local.sh configs/nodes_multi.json 10.0.0.200
+# On Machine 1 (172.16.0.200) — start gateway + relays:
+bash scripts/start_local.sh configs/nodes_multi.json 172.16.0.200
 ```
 
 **Run queries (from Machine 1):**
@@ -154,7 +154,7 @@ Two config files are provided:
 | File | Purpose |
 |------|---------|
 | `configs/nodes_single.json` | All nodes on localhost |
-| `configs/nodes_multi.json` | Nodes A-E on 10.0.0.200, F-I on 10.0.0.154 |
+| `configs/nodes_multi.json` | Nodes A-E on 172.16.0.200, F-I on 172.16.0.154 |
 
 Config structure:
 ```json
@@ -166,7 +166,7 @@ Config structure:
   },
   "nodes": {
     "A": {
-      "host": "10.0.0.200",
+      "host": "172.16.0.200",
       "port": 50051,
       "neighbors": ["B", "G", "H", "I"],
       "role": "gateway",
@@ -238,6 +238,6 @@ for f in logs/*.pid; do
 done
 
 # Test connectivity between machines
-nc -zv 10.0.0.200 50051
-nc -zv 10.0.0.154 50056
+nc -zv 172.16.0.200 50051
+nc -zv 172.16.0.154 50056
 ```
