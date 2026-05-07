@@ -5,6 +5,8 @@
 #include <future>
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
+#include <list>
 #include <vector>
 #include <iomanip>
 #include <ctime>
@@ -15,6 +17,37 @@
 #include "parking_violation_query.grpc.pb.h"
 #include "common/config.hpp"
 #include "common/sharding.hpp"
+
+static const size_t MAX_CACHE_ENTRIES = 64;
+
+static std::string build_cache_key(const parkingviolation::ForwardRequest* req) {
+    std::string key;
+    if (req->has_plate_id()) {
+        key = "plate:" + req->plate_id();
+    } else if (req->has_violation_code()) {
+        key = "vc:" + std::to_string(req->violation_code());
+    } else if (req->has_issue_date()) {
+        key = "date:" + req->issue_date().start() + "~" + req->issue_date().end();
+    } else if (req->has_plate_violation_history()) {
+        const auto& q = req->plate_violation_history();
+        key = "pvh:" + q.plate_id() + ":" + std::to_string(q.violation_code()) + ":" +
+              q.date_range().start() + "~" + q.date_range().end() + ":" + q.registration_state();
+    } else if (req->has_violation_code_date_range()) {
+        const auto& q = req->violation_code_date_range();
+        key = "vcdr:" + std::to_string(q.violation_code()) + ":" +
+              q.date_range().start() + "~" + q.date_range().end();
+    } else if (req->has_precinct_vehicle_analysis()) {
+        const auto& q = req->precinct_vehicle_analysis();
+        key = "pva:" + q.county() + ":" + std::to_string(q.precinct()) + ":" +
+              std::to_string(q.vehicle_year_min()) + "~" + std::to_string(q.vehicle_year_max()) + ":" + q.body_type();
+    } else if (req->has_unregistered_vehicle_lookup()) {
+        const auto& q = req->unregistered_vehicle_lookup();
+        key = "uvl:" + std::string(q.unregistered() ? "1" : "0") + ":" + q.state() + ":" +
+              std::to_string(q.feet_from_curb_min());
+    }
+    key += "|cs:" + std::to_string(req->chunk_size());
+    return key;
+}
 
 class ParkingServiceImpl final : public parkingviolation::ParkingViolationService::Service {
 public:
@@ -40,6 +73,39 @@ private:
     std::unordered_set<std::string> processed_requests_;
     std::map<std::string, std::unique_ptr<parkingviolation::ParkingViolationService::Stub>> neighbor_stubs_;
 
+    // LRU cache: key -> chunks
+    std::mutex cache_mutex_;
+    std::list<std::string> cache_order_;
+    std::unordered_map<std::string, std::pair<std::vector<parkingviolation::Chunk>,
+                       std::list<std::string>::iterator>> cache_;
+
+    void cache_put(const std::string& key, const std::vector<parkingviolation::Chunk>& chunks) {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        auto it = cache_.find(key);
+        if (it != cache_.end()) {
+            cache_order_.erase(it->second.second);
+            cache_.erase(it);
+        }
+        if (cache_.size() >= MAX_CACHE_ENTRIES) {
+            auto oldest = cache_order_.back();
+            cache_order_.pop_back();
+            cache_.erase(oldest);
+        }
+        cache_order_.push_front(key);
+        cache_[key] = {chunks, cache_order_.begin()};
+    }
+
+    bool cache_get(const std::string& key, std::vector<parkingviolation::Chunk>& out) {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        auto it = cache_.find(key);
+        if (it == cache_.end()) return false;
+        cache_order_.erase(it->second.second);
+        cache_order_.push_front(key);
+        it->second.second = cache_order_.begin();
+        out = it->second.first;
+        return true;
+    }
+
     grpc::Status SubmitQuery(grpc::ServerContext* context,
                              const parkingviolation::QueryRequest* request,
                              parkingviolation::QueryResponse* response) override {
@@ -60,7 +126,7 @@ private:
         std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway received query: request_id=" << req_id
                   << ", type=" << query_type << ", chunk_size=" << request->chunk_size() << std::endl;
 
-        // Convert QueryRequest to ForwardRequest
+        // Build a temporary ForwardRequest to compute cache key
         parkingviolation::ForwardRequest forward_req;
         forward_req.set_request_id(req_id);
         forward_req.set_from_node(config_.node_id);
@@ -81,6 +147,16 @@ private:
             forward_req.mutable_unregistered_vehicle_lookup()->CopyFrom(request->unregistered_vehicle_lookup());
         }
         forward_req.set_chunk_size(request->chunk_size());
+
+        // Check gateway-level cache
+        std::string cache_key = build_cache_key(&forward_req);
+        std::vector<parkingviolation::Chunk> cached_chunks;
+        if (cache_get(cache_key, cached_chunks)) {
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT at gateway for key=" << cache_key << std::endl;
+            for (const auto& chunk : cached_chunks) response->add_chunks()->CopyFrom(chunk);
+            return grpc::Status::OK;
+        }
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE MISS at gateway, forwarding query" << std::endl;
 
         // Forward to all neighbors in parallel
         using ChunkVec = std::vector<parkingviolation::Chunk>;
@@ -105,11 +181,17 @@ private:
             }));
         }
 
+        std::vector<parkingviolation::Chunk> all_result_chunks;
         for (auto& f : futures) {
-            for (const auto& chunk : f.get()) response->add_chunks()->CopyFrom(chunk);
+            for (const auto& chunk : f.get()) all_result_chunks.push_back(chunk);
         }
+        for (const auto& chunk : all_result_chunks) response->add_chunks()->CopyFrom(chunk);
+
+        // Store in gateway cache
+        cache_put(cache_key, all_result_chunks);
+
         std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway response contains " << response->chunks_size()
-                  << " total chunks" << std::endl;
+                  << " total chunks (cached)" << std::endl;
         return grpc::Status::OK;
     }
 
@@ -139,6 +221,15 @@ private:
         std::cout << "[" << timestamp() << "][" << config_.node_id << "] ForwardQuery received: request_id=" << req_id
                   << ", from_node=" << from_node << ", type=" << query_type
                   << ", neighbors=" << config_.neighbors.size() << std::endl;
+
+        // Check node-level cache
+        std::string cache_key = build_cache_key(request);
+        std::vector<parkingviolation::Chunk> cached_chunks;
+        if (cache_get(cache_key, cached_chunks)) {
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT for key=" << cache_key << std::endl;
+            for (const auto& chunk : cached_chunks) response->add_chunks()->CopyFrom(chunk);
+            return grpc::Status::OK;
+        }
 
         std::string data_file = config_.data_file.empty() ? config_.global_data_file : config_.data_file;
 
@@ -187,6 +278,10 @@ private:
                 all_chunks.insert(all_chunks.end(), chunks.begin(), chunks.end());
             }
         }
+
+        // Store in cache
+        cache_put(cache_key, all_chunks);
+        std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE STORE for key=" << cache_key << std::endl;
 
         // Step 3: Return aggregated results
         for (const auto& chunk : all_chunks) {
