@@ -52,6 +52,9 @@ done <<< "$LOCAL_NODES"
 
 sleep 0.5
 
+# Clear old logs
+rm -f "$LOG_DIR"/*.log
+
 # Start nodes
 while IFS=' ' read -r node lang role port; do
     if [ "$lang" = "cpp" ]; then
