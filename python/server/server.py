@@ -10,8 +10,10 @@ import sys
 
 class Config:
     def __init__(self, config_file, node_id):
+        import os
         with open(config_file) as f:
             data = json.load(f)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(config_file)))
         global_data = data['global']
         node_data = data['nodes'][node_id]
         self.node_id = node_data['node_id']
@@ -23,15 +25,22 @@ class Config:
         self.role = node_data['role']
         self.client_facing = node_data['client_facing']
         self.chunk_size = node_data.get('chunk_size', global_data['default_chunk_size'])
-        self.global_data_file = global_data['shared_data_file']
+        self.global_data_file = self._resolve_path(global_data['shared_data_file'], base_dir)
         self.date_field = global_data['date_field']
         if node_data['data_file'] is None:
             self.data_file = self.global_data_file
         else:
-            self.data_file = node_data['data_file']
+            self.data_file = self._resolve_path(node_data['data_file'], base_dir)
         self.shard = node_data['shard']  # dict or None
         self.neighbor_hosts = {nid: nd['host'] for nid, nd in data['nodes'].items()}
         self.neighbor_ports = {nid: nd['port'] for nid, nd in data['nodes'].items()}
+
+    @staticmethod
+    def _resolve_path(path, base_dir):
+        import os
+        if not path or os.path.isabs(path):
+            return path
+        return os.path.join(base_dir, path)
 
     def get_neighbor_addr(self, neighbor_id):
         host = self.neighbor_hosts.get(neighbor_id, 'localhost')

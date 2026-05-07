@@ -5,6 +5,7 @@
 #include <vector>
 #include <map>
 #include <fstream>
+#include <filesystem>
 #include <nlohmann/json.hpp>
 
 struct Shard {
@@ -31,11 +32,17 @@ struct NodeConfig {
     std::map<std::string, int> neighbor_ports;
 };
 
+static std::string resolve_path(const std::string& path, const std::string& base_dir) {
+    if (path.empty() || path[0] == '/') return path;
+    return (std::filesystem::path(base_dir) / path).string();
+}
+
 NodeConfig load_node_config(const std::string& config_path, const std::string& node_id) {
     std::ifstream f(config_path);
     if (!f.is_open()) {
         throw std::runtime_error("Failed to open config file: " + config_path);
     }
+    std::string base_dir = std::filesystem::path(config_path).parent_path().parent_path().string();
     nlohmann::json j;
     f >> j;
     if (!j.contains("nodes") || !j["nodes"].contains(node_id)) {
@@ -53,12 +60,12 @@ NodeConfig load_node_config(const std::string& config_path, const std::string& n
     config.role = node["role"];
     config.client_facing = node["client_facing"];
     config.chunk_size = node.value("chunk_size", global["default_chunk_size"].get<int>());
-    config.global_data_file = global["shared_data_file"];
+    config.global_data_file = resolve_path(global["shared_data_file"], base_dir);
     config.date_field = global["date_field"];
     if (node["data_file"].is_null()) {
         config.data_file = config.global_data_file;
     } else {
-        config.data_file = node["data_file"];
+        config.data_file = resolve_path(node["data_file"], base_dir);
     }
     if (node["shard"].is_object()) {
         auto s = node["shard"];
