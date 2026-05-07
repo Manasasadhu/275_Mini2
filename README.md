@@ -1,6 +1,6 @@
 # CMPE 275 Mini 2 — Distributed Parking Violations Query System
 
-A multi-node distributed query system for NYC parking violations data. 9 nodes form a fixed tree overlay network using gRPC. Clients submit queries through a gateway node (A), which propagates them through the tree. Worker nodes filter and stream results in chunks back to the client.
+A multi-node distributed query system for NYC parking violations data. 9 nodes form a fixed tree overlay network using gRPC. Clients submit queries through a gateway node (A), which propagates them through the tree. Worker nodes filter results by their shard and return chunked results that the client pulls on demand.
 
 ---
 
@@ -45,6 +45,51 @@ Connected via ethernet switch on a private 172.16.0.0/24 network.
 
 ---
 
+## Key Features
+
+### Client-Side Chunk Control
+
+The client controls memory and bandwidth by pulling results incrementally:
+
+1. `SubmitQuery` — gateway processes the query across all nodes, stores results server-side, returns metadata (`total_chunks`, `request_id`)
+2. `FetchChunks(request_id, offset, limit)` — client pulls chunks on demand in configurable batches
+
+```bash
+# Fetch 3 chunks at a time (default: 5)
+./build/client -c configs/nodes_multi.json -f 3
+```
+
+### LRU Query Cache
+
+Every node (gateway, relay, worker) maintains an in-memory LRU cache (64 entries). Cache keys are derived from query parameters, so repeated identical queries return instantly without re-scanning the CSV or forwarding downstream. Logs show `CACHE HIT` vs `CACHE MISS` with lookup times.
+
+### Cancel Propagation
+
+`CancelQuery(request_id)` propagates through the entire tree:
+- Marks the request as cancelled on each node
+- Removes stored results from the gateway
+- Nodes receiving a `ForwardQuery` for a cancelled request abort immediately
+
+### Performance Timing
+
+All nodes log detailed timing metrics:
+- **Gateway**: total query processing time, per-neighbor RPC latency
+- **Workers**: CSV shard scan duration
+- **All nodes**: cache lookup time (microseconds for hits)
+
+Example log output:
+```
+[14:32:01.234][A] Received 3 chunks from B (rpc_time=1204 ms)
+[14:32:01.234][D] Own shard returned 1 chunks (scan_time=890 ms)
+[14:32:01.235][A] CACHE HIT at gateway (lookup_time=12 us)
+```
+
+### Async Parallel Forwarding
+
+Both C++ (`std::async`) and Python (`ThreadPoolExecutor`) servers forward queries to neighbors in parallel, minimizing latency through the tree.
+
+---
+
 ## Query Types
 
 | # | Query | Fields |
@@ -60,7 +105,7 @@ Connected via ethernet switch on a private 172.16.0.0/24 network.
 - C++17 compiler
 - CMake >= 3.15
 - gRPC and Protocol Buffers (C++ libraries)
-- Python 3.x with `grpcio` (`pip install grpcio grpcio-tools`)
+- Python 3.x (venv + grpcio created automatically by `build.sh`)
 
 ---
 
@@ -75,18 +120,11 @@ git checkout feat/multi-host-v2
 ./build.sh
 ```
 
+`build.sh` compiles the C++ binaries and automatically creates a Python venv with grpcio if one doesn't exist.
+
 ### 2. Data File
 
 Place `combined_parking_violations.csv` in the project root on every machine. The config uses a relative path — no hardcoded paths needed.
-
-### 3. Python Dependencies
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install grpcio grpcio-tools
-bash scripts/gen_proto.sh
-```
 
 ---
 
@@ -175,12 +213,6 @@ If ping fails:
 git fetch origin
 git checkout feat/multi-host-v2
 ./build.sh
-
-# Python dependencies (for machines running Python nodes)
-python3 -m venv venv
-source venv/bin/activate
-pip install grpcio grpcio-tools
-bash scripts/gen_proto.sh
 ```
 
 Ensure `combined_parking_violations.csv` is present in the project root on both machines.
@@ -258,7 +290,7 @@ Config structure:
 │   │   ├── config.hpp                    # JSON config loader
 │   │   └── sharding.hpp                  # CSV scanning + query filtering
 │   ├── server/server.cpp                 # C++ server (gateway/relay/worker)
-│   └── client/client.cpp                 # C++ client
+│   └── client/client.cpp                 # C++ client (pull-based chunk retrieval)
 ├── python/server/server.py               # Python server (nodes F, H, I)
 ├── configs/
 │   ├── nodes_single.json                 # Single-host config
@@ -269,7 +301,7 @@ Config structure:
 │   ├── run_all.sh                        # Start all 9 on localhost (legacy)
 │   ├── stop_all.sh                       # Stop all (legacy)
 │   └── gen_proto.sh                      # Regenerate Python proto stubs
-├── build.sh                              # CMake build script
+├── build.sh                              # CMake build + Python venv setup
 └── CMakeLists.txt
 ```
 
@@ -277,13 +309,27 @@ Config structure:
 
 ## How It Works
 
-1. Client sends query to Node A (gateway) via `SubmitQuery` RPC
+1. Client calls `SubmitQuery` on Node A (gateway)
 2. A converts to `ForwardRequest` and forwards to neighbors (B, G, H, I) in parallel
-3. Relay nodes (B, E) propagate to their downstream neighbors, skipping the sender
+3. Relay nodes (B, E) propagate to their downstream neighbors in parallel, skipping the sender
 4. Worker nodes scan the CSV, filter by their shard date range, then apply the query filter
-5. Results are chunked and returned upstream
-6. Gateway aggregates all chunks into a single `QueryResponse`
-7. Nodes D and G have multiple parents — deduplication prevents re-processing
+5. Results are chunked and aggregated back up the tree
+6. Gateway stores all chunks and returns metadata to the client
+7. Client pulls chunks on demand via `FetchChunks(request_id, offset, limit)`
+8. Nodes D and G have multiple parents — deduplication prevents re-processing
+9. Repeated queries are served from LRU cache at every level
+
+---
+
+## gRPC Service API
+
+| RPC | Purpose |
+|-----|---------|
+| `SubmitQuery(QueryRequest) → QueryResponse` | Submit query, get metadata (total_chunks, request_id) |
+| `FetchChunks(FetchChunksRequest) → FetchChunksResponse` | Pull chunks by offset/limit |
+| `ForwardQuery(ForwardRequest) → ForwardResponse` | Internal: propagate query through tree |
+| `CancelQuery(CancelRequest) → CancelResponse` | Cancel in-flight query, propagates to all nodes |
+| `HealthCheck(HealthRequest) → HealthResponse` | Node health check |
 
 ---
 
