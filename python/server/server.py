@@ -114,6 +114,8 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         self.processed_requests = set()  # for dedup
         self.neighbor_stubs = {}  # gRPC stubs to neighbors
         self.cache = LRUCache()
+        self.result_store = {}  # request_id -> list of chunks (for client pull)
+        self.result_store_lock = threading.Lock()
 
         # Initialize gRPC stubs to all neighbors
         msg_options = [('grpc.max_receive_message_length', -1), ('grpc.max_send_message_length', -1)]
@@ -160,27 +162,35 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         cached = self.cache.get(cache_key)
         if cached is not None:
             logger.info(f"[{self.config.node_id}] CACHE HIT at gateway for key={cache_key}")
+            with self.result_store_lock:
+                self.result_store[request.request_id] = cached
             response = parking_violation_query_pb2.QueryResponse()
-            response.chunks.extend(cached)
+            response.total_chunks = len(cached)
+            response.request_id = request.request_id
             return response
 
         logger.info(f"[{self.config.node_id}] CACHE MISS at gateway, forwarding query")
 
-        response = parking_violation_query_pb2.QueryResponse()
+        all_chunks = []
 
         # Forward to all neighbors
         for neighbor in self.config.neighbors:
             try:
                 fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(fwd_request, timeout=120)
-                for chunk in fwd_response.chunks:
-                    response.chunks.append(chunk)
+                all_chunks.extend(fwd_response.chunks)
                 logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
             except Exception as e:
                 logger.error(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
 
-        # Store in gateway cache
-        self.cache.put(cache_key, list(response.chunks))
+        # Store in gateway cache and result store
+        self.cache.put(cache_key, all_chunks)
+        with self.result_store_lock:
+            self.result_store[request.request_id] = all_chunks
 
+        response = parking_violation_query_pb2.QueryResponse()
+        response.total_chunks = len(all_chunks)
+        response.request_id = request.request_id
+        logger.info(f"[{self.config.node_id}] Gateway stored {len(all_chunks)} chunks for client pull (request_id={request.request_id})")
         return response
 
     def ForwardQuery(self, request, context):
@@ -374,6 +384,28 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
 
         logger.info(f"[{self.config.node_id}] Shard query complete: matched={matched}, chunks={len(chunks)}")
         return chunks
+
+    def FetchChunks(self, request, context):
+        req_id = request.request_id
+        offset = request.offset
+        limit = request.limit
+
+        with self.result_store_lock:
+            chunks = self.result_store.get(req_id)
+
+        if chunks is None:
+            context.abort(grpc.StatusCode.NOT_FOUND, f"No results for request_id={req_id}")
+
+        total = len(chunks)
+        end = min(offset + limit, total)
+        response = parking_violation_query_pb2.FetchChunksResponse()
+        response.total_chunks = total
+        response.has_more = (end < total)
+        for i in range(offset, end):
+            response.chunks.append(chunks[i])
+
+        logger.info(f"[{self.config.node_id}] FetchChunks: request_id={req_id} offset={offset} limit={limit} returned={end - offset} has_more={end < total}")
+        return response
 
     def CancelQuery(self, request, context):
         return parking_violation_query_pb2.CancelResponse(success=True)
