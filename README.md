@@ -143,6 +143,37 @@ bash scripts/start_local.sh configs/nodes_single.json
 bash scripts/stop_local.sh
 ```
 
+### Quick Multi-Host Setup (auto-configure)
+
+Instead of manually editing config files, use the `configure_hosts.sh` script to generate the config from IP addresses:
+
+```bash
+# 2 machines:
+bash scripts/configure_hosts.sh <IP1> <IP2>
+
+# 3 machines:
+bash scripts/configure_hosts.sh <IP1> <IP2> <IP3>
+
+# Auto-detect this machine's IP as Machine 1:
+bash scripts/configure_hosts.sh auto <IP2>
+```
+
+Examples:
+```bash
+# 2-host: Machine 1 runs A,B,C,D,E — Machine 2 runs F,G,H,I
+bash scripts/configure_hosts.sh 172.16.0.200 172.16.0.154
+
+# 3-host: Machine 1 runs A,B,C — Machine 2 runs D,E,F — Machine 3 runs G,H,I
+bash scripts/configure_hosts.sh 172.16.0.100 172.16.0.200 172.16.0.154
+```
+
+This overwrites `configs/nodes_multi.json`. Copy the generated file to all machines, then start nodes on each machine:
+```bash
+bash scripts/start_local.sh configs/nodes_multi.json <this-machines-IP>
+```
+
+---
+
 ### Multi-Host (2 machines via network switch)
 
 #### Hardware Setup
