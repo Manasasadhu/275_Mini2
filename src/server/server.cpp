@@ -182,7 +182,7 @@ private:
             futures.push_back(std::async(std::launch::async, [this, neighbor, &forward_req]() {
                 ChunkVec chunks;
                 grpc::ClientContext ctx;
-                ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(600));
+                ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(1800));
                 parkingviolation::ForwardResponse fwd_response;
                 auto fwd_start = std::chrono::high_resolution_clock::now();
                 grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, forward_req, &fwd_response);
@@ -326,7 +326,7 @@ private:
                 futures.push_back(std::async(std::launch::async, [this, neighbor, request]() {
                     ChunkVec chunks;
                     grpc::ClientContext ctx;
-                    ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(600));
+                    ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(1800));
                     parkingviolation::ForwardResponse fwd_response;
                     auto fwd_start = std::chrono::high_resolution_clock::now();
                     grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, *request, &fwd_response);
