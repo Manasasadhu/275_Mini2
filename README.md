@@ -157,6 +157,70 @@ You need:
  Nodes A, B, C, D, E                              Nodes F, G, H, I
 ```
 
+### Multi-Host (3 machines via network switch)
+
+#### Hardware Setup
+
+You need:
+- 1 unmanaged network switch (any port count)
+- 3 ethernet cables
+
+```
+[Machine 1] ──ethernet──┐
+ (172.16.0.100)          │
+ Nodes A, B, C           │
+                      [SWITCH]
+[Machine 2] ──ethernet──┤
+ (172.16.0.200)          │
+ Nodes D, E, F           │
+                         │
+[Machine 3] ──ethernet──┘
+ (172.16.0.154)
+ Nodes G, H, I
+```
+
+#### Network Configuration (3-host)
+
+```bash
+# Machine 1:
+sudo ifconfig <eth-interface> 172.16.0.100 netmask 255.255.255.0 up
+
+# Machine 2:
+sudo ifconfig <eth-interface> 172.16.0.200 netmask 255.255.255.0 up
+
+# Machine 3:
+sudo ifconfig <eth-interface> 172.16.0.154 netmask 255.255.255.0 up
+```
+
+#### Start Nodes (3-host)
+
+```bash
+# Machine 3 (172.16.0.154) — start workers first:
+bash scripts/start_local.sh configs/nodes_multi_3host.json 172.16.0.154
+
+# Machine 2 (172.16.0.200) — start relay + workers:
+bash scripts/start_local.sh configs/nodes_multi_3host.json 172.16.0.200
+
+# Machine 1 (172.16.0.100) — start gateway + relay + worker:
+bash scripts/start_local.sh configs/nodes_multi_3host.json 172.16.0.100
+```
+
+**Run queries (from Machine 1):**
+
+```bash
+./build/client -c configs/nodes_multi_3host.json
+```
+
+**Stop nodes on each machine:**
+
+```bash
+bash scripts/stop_local.sh
+```
+
+---
+
+#### 2-Host Network Configuration and Start (below)
+
 1. Power on the switch
 2. Connect Machine 1 to any switch port via ethernet cable
 3. Connect Machine 2 to another switch port via ethernet cable
@@ -245,12 +309,13 @@ bash scripts/stop_local.sh
 
 ## Configuration
 
-Two config files are provided:
+Config files provided:
 
 | File | Purpose |
 |------|---------|
 | `configs/nodes_single.json` | All nodes on localhost |
-| `configs/nodes_multi.json` | Nodes A-E on 172.16.0.200, F-I on 172.16.0.154 |
+| `configs/nodes_multi.json` | 2-host: A-E on 172.16.0.200, F-I on 172.16.0.154 |
+| `configs/nodes_multi_3host.json` | 3-host: A-C on 172.16.0.100, D-F on 172.16.0.200, G-I on 172.16.0.154 |
 
 Config structure:
 ```json
