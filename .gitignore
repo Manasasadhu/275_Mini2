@@ -1,5 +1,6 @@
 build/
 logs/
+archives/
 *.csv
 venv/
 __pycache__/

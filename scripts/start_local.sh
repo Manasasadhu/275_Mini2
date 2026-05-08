@@ -52,6 +52,9 @@ done <<< "$LOCAL_NODES"
 
 sleep 0.5
 
+# Archive existing logs and results before clearing
+bash "$SCRIPT_DIR/archive_logs.sh"
+
 # Clear old logs
 rm -f "$LOG_DIR"/*.log
 
