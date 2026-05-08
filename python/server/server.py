@@ -301,7 +301,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
             q_date_end = datetime.strptime(request.violation_code_date_range.date_range.end, '%Y-%m-%d')
 
         try:
-            with open(self.config.data_file, 'r') as f:
+            with open(self.config.data_file, 'r', encoding='utf-8', errors='replace') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     issue_date_str = row[self.config.date_field]
