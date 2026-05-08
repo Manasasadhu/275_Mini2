@@ -302,7 +302,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
 
         try:
             with open(self.config.data_file, 'r', encoding='utf-8', errors='replace') as f:
-                reader = csv.DictReader(f)
+                reader = csv.DictReader((line.replace('\x00', '') for line in f))
                 for row in reader:
                     issue_date_str = row[self.config.date_field]
                     try:
