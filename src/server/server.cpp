@@ -244,9 +244,11 @@ private:
         }
         response->set_has_more(end < total);
 
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] FetchChunks: request_id=" << req_id
-                  << " offset=" << offset << " limit=" << limit << " returned=" << (end - offset)
-                  << " has_more=" << (end < total) << std::endl;
+        if (offset == 0 || end >= total) {
+            std::cout << "[" << timestamp() << "][" << config_.node_id << "] FetchChunks: request_id=" << req_id
+                      << " offset=" << offset << " limit=" << limit << " returned=" << (end - offset)
+                      << " has_more=" << (end < total) << " total_chunks=" << total << std::endl;
+        }
         return grpc::Status::OK;
     }
 

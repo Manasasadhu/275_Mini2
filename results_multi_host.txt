@@ -1,0 +1,33 @@
+
+=== Executing All Queries (chunk_size=100, fetch_batch=5) ===
+[q1] SubmitQuery complete: 6 chunks available (435039 ms)
+[q1] Fetched 6 chunks (1 records) in 2 fetch calls, total 435041 ms
+  Top 5 results:
+  [1] plate=JER1863 date=07/18/2022 code=5 state=NY county=MN
+[q2] SubmitQuery complete: 10134 chunks available (539443 ms)
+[q2] Fetched 10134 chunks (1013134 records) in 2027 fetch calls, total 553209 ms
+  Top 5 results:
+  [1] plate=22499MJ date=05/09/2019 body=VAN year=2022 county=NY
+  [2] plate=KTR2943 date=07/01/2022 body=SUBN year=2022 county=NY
+  [3] plate=KRR2099 date=07/04/2022 body=SUBN year=2022 county=NY
+  [4] plate=KVW9962 date=07/03/2022 body=SUBN year=2022 county=NY
+  [5] plate=KRV3643 date=07/03/2022 body=SDN year=2022 county=NY
+[q3] SubmitQuery complete: 1061 chunks available (451580 ms)
+[q3] Fetched 1061 chunks (105508 records) in 213 fetch calls, total 452496 ms
+  Top 5 results:
+  [1] plate=JFY6761 date=07/07/2022 county=QN make=INFIN fine=$0
+  [2] plate=KPZ2417 date=07/07/2022 county=MN make=HONDA fine=$0
+  [3] plate=GFN7546 date=07/07/2022 county=BK make=FORD fine=$0
+  [4] plate=KVD2614 date=07/07/2022 county=ST make=ME/BE fine=$0
+  [5] plate=HVC3378 date=07/07/2022 county=QN make=JEEP fine=$0
+[q4] SubmitQuery complete: 234 chunks available (470697 ms)
+[q4] Fetched 234 chunks (22885 records) in 47 fetch calls, total 470879 ms
+  Top 5 results:
+  [1] plate=L18NAP date=07/01/2022 county=BK make=JEEP fine=$0
+  [2] plate=KEE5315 date=07/01/2022 county=BK make=JEEP fine=$0
+  [3] plate=G27MWV date=07/01/2022 county=MN make=FORD fine=$0
+  [4] plate=HZ5115 date=07/01/2022 county=QN make=ME/BE fine=$0
+  [5] plate=HVD5826 date=07/01/2022 county=ST make=CHEVR fine=$0
+
+=== Summary: Total time 1912398 ms ===
+
