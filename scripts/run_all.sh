@@ -17,6 +17,10 @@ if command -v python3.10 >/dev/null 2>&1; then
 fi
 
 mkdir -p "$LOG_DIR"
+
+# Archive existing logs and results before clearing
+bash "$SCRIPT_DIR/archive_logs.sh"
+
 rm -f "$LOG_DIR"/*.log "$LOG_DIR"/*.pid
 
 # C++ nodes (A, B, C, D, E, G)

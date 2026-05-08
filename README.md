@@ -376,6 +376,35 @@ Config structure:
 
 ---
 
+## Log & Result Archiving
+
+Every time nodes are started (via `start_local.sh` or `run_all.sh`), existing logs and results are automatically archived before being cleared. Archives are stored in `archives/` with timestamps.
+
+```
+archives/
+├── 20260507_225530/       # auto-timestamped
+│   ├── A.log
+│   ├── B.log
+│   ├── ...
+│   ├── results_2host.txt
+│   └── results_2host_v2.txt
+└── 20260508_143000_before_cache_test/   # with custom label
+```
+
+**Manual archiving:**
+
+```bash
+# Archive current logs/results with auto-timestamp
+bash scripts/archive_logs.sh
+
+# Archive with a custom label
+bash scripts/archive_logs.sh "before_cache_test"
+```
+
+Archives are git-ignored and stay local to each machine.
+
+---
+
 ## Project Structure
 
 ```
@@ -396,7 +425,9 @@ Config structure:
 │   ├── stop_local.sh                     # Stop local nodes
 │   ├── run_all.sh                        # Start all 9 on localhost (legacy)
 │   ├── stop_all.sh                       # Stop all (legacy)
+│   ├── archive_logs.sh                   # Archive logs + results with timestamp
 │   └── gen_proto.sh                      # Regenerate Python proto stubs
+├── archives/                             # Timestamped log/result snapshots (git-ignored)
 ├── build.sh                              # CMake build + Python venv setup
 └── CMakeLists.txt
 ```
