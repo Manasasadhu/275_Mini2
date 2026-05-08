@@ -319,19 +319,23 @@ private:
             using ChunkVec = std::vector<parkingviolation::Chunk>;
             std::vector<std::future<ChunkVec>> futures;
 
+            // Update from_node to this node so downstream neighbors skip us
+            parkingviolation::ForwardRequest outgoing_req(*request);
+            outgoing_req.set_from_node(config_.node_id);
+
             for (const auto& neighbor : config_.neighbors) {
                 if (neighbor == from_node) {
                     std::cout << "[" << timestamp() << "][" << config_.node_id << "] Skipping " << neighbor << " (query came from here)" << std::endl;
                     continue;
                 }
                 std::cout << "[" << timestamp() << "][" << config_.node_id << "] Forwarding to neighbor " << neighbor << std::endl;
-                futures.push_back(std::async(std::launch::async, [this, neighbor, request]() {
+                futures.push_back(std::async(std::launch::async, [this, neighbor, &outgoing_req]() {
                     ChunkVec chunks;
                     grpc::ClientContext ctx;
                     ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(1800));
                     parkingviolation::ForwardResponse fwd_response;
                     auto fwd_start = std::chrono::high_resolution_clock::now();
-                    grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, *request, &fwd_response);
+                    grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, outgoing_req, &fwd_response);
                     auto fwd_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::high_resolution_clock::now() - fwd_start).count();
                     if (status.ok()) {
