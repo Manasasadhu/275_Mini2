@@ -245,10 +245,15 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
             for skipped in [n for n in self.config.neighbors if n == from_node]:
                 logger.info(f"[{self.config.node_id}] Skipping {skipped} (query came from here)")
 
+            # Update from_node to this node so downstream neighbors skip us
+            outgoing_req = parking_violation_query_pb2.ForwardRequest()
+            outgoing_req.CopyFrom(request)
+            outgoing_req.from_node = self.config.node_id
+
             def forward_downstream(neighbor):
                 try:
                     fwd_start = time.perf_counter()
-                    fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(request, timeout=600)
+                    fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(outgoing_req, timeout=600)
                     fwd_ms = int((time.perf_counter() - fwd_start) * 1000)
                     logger.info(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor} (rpc_time={fwd_ms} ms)")
                     return list(fwd_response.chunks)
