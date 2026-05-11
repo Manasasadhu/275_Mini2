@@ -6,9 +6,20 @@
 #include <fstream>
 #include <sstream>
 #include <ctime>
+#include <chrono>
+#include <iomanip>
 #include "parking_violation_query.pb.h"
 
 using namespace parkingviolation;
+
+static std::string timestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    std::ostringstream oss;
+    oss << std::put_time(std::localtime(&t), "%H:%M:%S") << "." << std::setfill('0') << std::setw(3) << ms.count();
+    return oss.str();
+}
 
 // Parse MM/DD/YYYY to compare with YYYY-MM-DD
 bool date_in_range(const std::string& issue_date, const std::string& shard_start, const std::string& shard_end) {
@@ -85,14 +96,14 @@ std::vector<Chunk> process_query_on_shard(
     int chunk_size
 ) {
     std::vector<Chunk> chunks;
-    std::cout << "[SHARD] Starting shard scan for request " << request->request_id()
+    std::cout << "[" << timestamp() << "][SHARD] Starting shard scan for request " << request->request_id()
               << " file=" << csv_path
               << " shard_start=" << shard_start
               << " shard_end=" << shard_end
               << " chunk_size=" << chunk_size << std::endl;
     std::ifstream file(csv_path);
     if (!file.is_open()) {
-        std::cerr << "[SHARD] Failed to open data file: " << csv_path << std::endl;
+        std::cerr << "[" << timestamp() << "][SHARD] Failed to open data file: " << csv_path << std::endl;
         return chunks;
     }
     
@@ -183,7 +194,7 @@ std::vector<Chunk> process_query_on_shard(
     } else {
         chunks.back().set_is_last(true);
     }
-    std::cout << "[SHARD] Completed shard scan for request " << request->request_id()
+    std::cout << "[" << timestamp() << "][SHARD] Completed shard scan for request " << request->request_id()
               << ", chunks=" << chunks.size() << std::endl;
     
     return chunks;
