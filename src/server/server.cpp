@@ -118,6 +118,7 @@ private:
     grpc::Status ForwardQuery(grpc::ServerContext* context,
                               const parkingviolation::ForwardRequest* request,
                               parkingviolation::ForwardResponse* response) override {
+        auto t_start = std::chrono::high_resolution_clock::now();
         std::string req_id = request->request_id();
         std::string from_node = request->from_node();
         std::string query_type = "unknown";
@@ -147,18 +148,21 @@ private:
         // Step 1: Process own shard
         std::vector<parkingviolation::Chunk> all_chunks;
         if (config_.shard && !data_file.empty()) {
+            auto t_shard_start = std::chrono::high_resolution_clock::now();
             std::cout << "[" << config_.node_id << "] Processing own shard (worker)" << std::endl;
             int chunk_size = request->chunk_size() > 0 ? request->chunk_size() : config_.chunk_size;
             auto chunks = process_query_on_shard(
                 data_file, config_.shard->start, config_.shard->end, request, chunk_size);
+            auto t_shard_end = std::chrono::high_resolution_clock::now();
+            auto shard_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_shard_end - t_shard_start).count();
             all_chunks.insert(all_chunks.end(), chunks.begin(), chunks.end());
-            std::cout << "[" << config_.node_id << "] Own shard returned " << chunks.size() << " chunks" << std::endl;
+            std::cout << "[" << config_.node_id << "] Own shard returned " << chunks.size() << " chunks in " << shard_ms << " ms" << std::endl;
         }
 
         // Step 2: Forward to neighbors in parallel (relay/gateway only)
         if (config_.role == "relay" || config_.role == "gateway") {
             using ChunkVec = std::vector<parkingviolation::Chunk>;
-            std::vector<std::future<ChunkVec>> futures;
+            std::vector<std::pair<std::string, std::future<std::pair<ChunkVec, long long>>>> futures;
 
             for (const auto& neighbor : config_.neighbors) {
                 if (neighbor == from_node) {
@@ -166,36 +170,41 @@ private:
                     continue;
                 }
                 std::cout << "[" << config_.node_id << "] Forwarding to neighbor " << neighbor << std::endl;
-                futures.push_back(std::async(std::launch::async, [this, neighbor, request]() {
+                futures.push_back({neighbor, std::async(std::launch::async, [this, neighbor, request]() {
+                    auto t0 = std::chrono::high_resolution_clock::now();
                     ChunkVec chunks;
                     grpc::ClientContext ctx;
                     ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(600));
                     parkingviolation::ForwardResponse fwd_response;
                     grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, *request, &fwd_response);
+                    auto t1 = std::chrono::high_resolution_clock::now();
+                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
                     if (status.ok()) {
                         for (const auto& chunk : fwd_response.chunks()) chunks.push_back(chunk);
                         std::cout << "[" << config_.node_id << "] Collected " << fwd_response.chunks_size()
-                                  << " chunks from " << neighbor << std::endl;
+                                  << " chunks from " << neighbor << " in " << ms << " ms" << std::endl;
                     } else {
                         std::cerr << "[" << config_.node_id << "] Error forwarding to " << neighbor
                                   << ": " << status.error_message() << std::endl;
                     }
-                    return chunks;
-                }));
+                    return std::make_pair(chunks, ms);
+                })});
             }
 
-            for (auto& f : futures) {
-                auto chunks = f.get();
+            for (auto& [neighbor, f] : futures) {
+                auto [chunks, ms] = f.get();
                 all_chunks.insert(all_chunks.end(), chunks.begin(), chunks.end());
             }
         }
 
         // Step 3: Return aggregated results
+        auto t_end = std::chrono::high_resolution_clock::now();
+        auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
         for (const auto& chunk : all_chunks) {
             response->add_chunks()->CopyFrom(chunk);
         }
         std::cout << "[" << config_.node_id << "] Returning " << all_chunks.size()
-                  << " total chunks for request " << req_id << std::endl;
+                  << " total chunks for request " << req_id << " (node total: " << total_ms << " ms)" << std::endl;
         return grpc::Status::OK;
     }
 

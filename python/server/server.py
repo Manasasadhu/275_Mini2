@@ -101,10 +101,12 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         return response
 
     def ForwardQuery(self, request, context):
+        import time
+        t_start = time.time()
         req_id = request.request_id
         from_node = request.from_node
         query_type = request.WhichOneof('query') or 'unknown'
-        
+
         # Deduplication
         if req_id in self.processed_requests:
             print(f"[{self.config.node_id}] Dedup: already processed {req_id}")
@@ -115,7 +117,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         print(f"[{self.config.node_id}] Forwarding neighbors={self.config.neighbors}")
 
         response = parking_violation_query_pb2.ForwardResponse()
-        
+
         # Forward to neighbors except the one that sent it (relay/gateway only)
         if self.config.role in ('relay', 'gateway'):
             for neighbor in self.config.neighbors:
@@ -123,19 +125,28 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     print(f"[{self.config.node_id}] Skipping {neighbor} (query came from here)")
                     continue
                 try:
+                    t_fwd_start = time.time()
                     fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(request, timeout=600)
+                    t_fwd_end = time.time()
+                    fwd_ms = (t_fwd_end - t_fwd_start) * 1000
                     response.chunks.extend(fwd_response.chunks)
-                    print(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
+                    print(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor} in {fwd_ms:.0f} ms")
                 except Exception as e:
                     print(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
 
         # Process own shard if this node is a worker
         if self.config.shard:
+            t_shard_start = time.time()
             print(f"[{self.config.node_id}] Processing own shard")
             chunks = self.process_query_on_shard(request)
+            t_shard_end = time.time()
+            shard_ms = (t_shard_end - t_shard_start) * 1000
             response.chunks.extend(chunks)
-            print(f"[{self.config.node_id}] Own shard returned {len(chunks)} chunks")
+            print(f"[{self.config.node_id}] Own shard returned {len(chunks)} chunks in {shard_ms:.0f} ms")
 
+        t_end = time.time()
+        total_ms = (t_end - t_start) * 1000
+        print(f"[{self.config.node_id}] Returning {len(response.chunks)} total chunks for request {req_id} (node total: {total_ms:.0f} ms)")
         return response
 
     def process_query_on_shard(self, request):
