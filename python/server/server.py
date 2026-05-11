@@ -29,6 +29,10 @@ class Config:
         else:
             self.data_file = node_data['data_file']
         self.shard = node_data['shard']  # dict or None
+        if self.shard and self.shard.get('type') == 'county':
+            self.shard_counties = set(self.shard.get('counties', []))
+        else:
+            self.shard_counties = set()
 
     def get_neighbor_port(self, neighbor_id):
         """Get port for a neighbor node"""
@@ -147,34 +151,33 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
             is_last=False
         )
         print(f"[{self.config.node_id}] Processing shard: file={self.config.data_file}, shard={self.config.shard}, request_id={request.request_id}, chunk_size={request.chunk_size}")
-        
-        shard_start = datetime.strptime(self.config.shard['start'], '%Y-%m-%d')
-        shard_end = datetime.strptime(self.config.shard['end'], '%Y-%m-%d')
 
-        q_date_start = q_date_end = None
-        if request.HasField('issue_date'):
-            q_date_start = datetime.strptime(request.issue_date.start, '%Y-%m-%d')
-            q_date_end = datetime.strptime(request.issue_date.end, '%Y-%m-%d')
-        elif request.HasField('plate_violation_history') and request.plate_violation_history.date_range.start:
-            q_date_start = datetime.strptime(request.plate_violation_history.date_range.start, '%Y-%m-%d')
-            q_date_end = datetime.strptime(request.plate_violation_history.date_range.end, '%Y-%m-%d')
-        elif request.HasField('violation_code_date_range') and request.violation_code_date_range.date_range.start:
-            q_date_start = datetime.strptime(request.violation_code_date_range.date_range.start, '%Y-%m-%d')
-            q_date_end = datetime.strptime(request.violation_code_date_range.date_range.end, '%Y-%m-%d')
+        known_counties = {
+            "BX", "BRONX", "BK", "K", "BKLYN", "MN", "MAN", "NY",
+            "QN", "Q", "QNS", "ST", "STATEN ISLAND", "SI"
+        }
+        is_catchall = self.config.shard_counties == {"OTHER"}
 
         try:
-            with open(self.config.data_file, 'r') as f:
+            with open(self.config.data_file, 'r', encoding='latin-1') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    issue_date_str = row[self.config.date_field]
-                    try:
-                        issue_date = datetime.strptime(issue_date_str, '%m/%d/%Y')
-                    except:
+                    # Bug fix: county may be None in CSV, guard with `or ''`
+                    county = (row.get('Violation County') or '').strip()
+                    if is_catchall:
+                        if county in known_counties:
+                            continue
+                    elif county not in self.config.shard_counties:
                         continue
 
-                    if not (shard_start <= issue_date <= shard_end):
-                        continue
-                    
+                    # Parse issue date once for any query type that needs it
+                    issue_date = None
+                    issue_date_str = row.get('Issue Date', '') or ''
+                    try:
+                        issue_date = datetime.strptime(issue_date_str, '%m/%d/%Y')
+                    except Exception:
+                        pass
+
                     # Query filter
                     if request.HasField('plate_id'):
                         if row.get('Plate ID') != request.plate_id:
@@ -186,7 +189,11 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                         except:
                             continue
                     elif request.HasField('issue_date'):
-                        if q_date_start and not (q_date_start <= issue_date <= q_date_end):
+                        if issue_date is None:
+                            continue
+                        q_start = datetime.strptime(request.issue_date.start, '%Y-%m-%d')
+                        q_end   = datetime.strptime(request.issue_date.end,   '%Y-%m-%d')
+                        if not (q_start <= issue_date <= q_end):
                             continue
                     elif request.HasField('plate_violation_history'):
                         q = request.plate_violation_history
@@ -196,8 +203,13 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                             continue
                         if q.registration_state and row.get('Registration State') != q.registration_state:
                             continue
-                        if q_date_start and not (q_date_start <= issue_date <= q_date_end):
-                            continue
+                        if q.date_range.start:
+                            if issue_date is None:
+                                continue
+                            q_start = datetime.strptime(q.date_range.start, '%Y-%m-%d')
+                            q_end   = datetime.strptime(q.date_range.end,   '%Y-%m-%d')
+                            if not (q_start <= issue_date <= q_end):
+                                continue
                     elif request.HasField('violation_code_date_range'):
                         q = request.violation_code_date_range
                         try:
@@ -205,8 +217,13 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                                 continue
                         except:
                             continue
-                        if q_date_start and not (q_date_start <= issue_date <= q_date_end):
-                            continue
+                        if q.date_range.start:
+                            if issue_date is None:
+                                continue
+                            q_start = datetime.strptime(q.date_range.start, '%Y-%m-%d')
+                            q_end   = datetime.strptime(q.date_range.end,   '%Y-%m-%d')
+                            if not (q_start <= issue_date <= q_end):
+                                continue
                     elif request.HasField('precinct_vehicle_analysis'):
                         q = request.precinct_vehicle_analysis
                         try:

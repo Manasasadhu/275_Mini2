@@ -3,10 +3,12 @@
 
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include <fstream>
 #include <sstream>
 #include <ctime>
 #include "parking_violation_query.pb.h"
+#include "common/config.hpp"
 
 using namespace parkingviolation;
 
@@ -76,56 +78,65 @@ ViolationRecord parse_csv_line(const std::string& line) {
 
 #include "parking_violation_query.grpc.pb.h"
 
-// Query shard: scan CSV, filter by shard+query, chunk results
+static const std::unordered_set<std::string> KNOWN_COUNTIES = {
+    "BX", "BRONX", "BK", "K", "BKLYN", "MN", "MAN", "NY", "QN", "Q", "QNS",
+    "ST", "STATEN ISLAND", "SI"
+};
+
+static std::string extract_csv_field(const std::string& line, int target_col) {
+    int col = 0;
+    size_t pos = 0;
+    while (pos <= line.size()) {
+        size_t next = line.find(',', pos);
+        if (next == std::string::npos) next = line.size();
+        if (col == target_col)
+            return line.substr(pos, next - pos);
+        pos = next + 1;
+        col++;
+    }
+    return "";
+}
+
+static bool county_in_shard(const std::string& county, const Shard* shard) {
+    if (shard->counties.size() == 1 && shard->counties[0] == "OTHER")
+        return KNOWN_COUNTIES.find(county) == KNOWN_COUNTIES.end();
+    for (const auto& c : shard->counties)
+        if (county == c) return true;
+    return false;
+}
+
+// Query shard: scan CSV, filter by county shard + query, chunk results
 std::vector<Chunk> process_query_on_shard(
     const std::string& csv_path,
-    const std::string& shard_start,
-    const std::string& shard_end,
+    const Shard* shard,
     const parkingviolation::ForwardRequest* request,
     int chunk_size
 ) {
     std::vector<Chunk> chunks;
     std::cout << "[SHARD] Starting shard scan for request " << request->request_id()
               << " file=" << csv_path
-              << " shard_start=" << shard_start
-              << " shard_end=" << shard_end
+              << " shard_type=" << shard->type
               << " chunk_size=" << chunk_size << std::endl;
     std::ifstream file(csv_path);
     if (!file.is_open()) {
         std::cerr << "[SHARD] Failed to open data file: " << csv_path << std::endl;
         return chunks;
     }
-    
+
     std::string line;
     std::getline(file, line);  // Skip header
-    
+
     Chunk current_chunk;
     current_chunk.set_request_id(request->request_id());
     current_chunk.set_is_last(false);
-    
+
     while (std::getline(file, line)) {
         if (line.empty()) continue;
-        
-        // Quick date check (4th field is Issue Date)
-        size_t pos = 0, field_num = 0;
-        std::string issue_date;
-        for (int i = 0; i < 5; i++) {
-            pos = line.find(',', pos);
-            if (i == 4) {
-                size_t start = line.rfind(',', pos - 1) + 1;
-                issue_date = line.substr(start, pos - start);
-                break;
-            }
-            pos++;
-        }
-        
-        bool valid_date = false;
-        try {
-            valid_date = date_in_range(issue_date, shard_start, shard_end);
-        } catch (...) {
-            valid_date = false;
-        }
-        if (!valid_date) continue;
+
+        std::string county = extract_csv_field(line, 21);
+        if (!county_in_shard(county, shard)) continue;
+
+        std::string issue_date = extract_csv_field(line, 4);
         
         ViolationRecord record = parse_csv_line(line);
         
