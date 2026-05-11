@@ -116,7 +116,7 @@ static bool county_in_shard(const std::string& county, const Shard* shard) {
     return false;
 }
 
-// Query shard: scan CSV, filter by county shard + query, chunk results
+// Query shard: scan CSV, filter by shard (county or date-range) + query, chunk results
 std::vector<Chunk> process_query_on_shard(
     const std::string& csv_path,
     const Shard* shard,
@@ -144,8 +144,17 @@ std::vector<Chunk> process_query_on_shard(
     while (std::getline(file, line)) {
         if (line.empty()) continue;
 
-        std::string county = extract_csv_field(line, 21);
-        if (!county_in_shard(county, shard)) continue;
+        // Apply shard filtering based on shard type
+        bool shard_match = false;
+        if (shard->type == "county_range") {
+            std::string county = extract_csv_field(line, 21);
+            shard_match = county_in_shard(county, shard);
+        } else {
+            // Default: date-based sharding (issue_date_range)
+            std::string issue_date = extract_csv_field(line, 4);
+            shard_match = date_in_range(issue_date, shard->start, shard->end);
+        }
+        if (!shard_match) continue;
 
         std::string issue_date = extract_csv_field(line, 4);
         
