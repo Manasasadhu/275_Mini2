@@ -12,6 +12,7 @@ struct Shard {
     std::string type;
     std::string start;
     std::string end;
+    std::vector<std::string> counties;
 };
 
 struct NodeConfig {
@@ -69,7 +70,15 @@ NodeConfig load_node_config(const std::string& config_path, const std::string& n
     }
     if (node["shard"].is_object()) {
         auto s = node["shard"];
-        config.shard = new Shard{s["type"], s["start"], s["end"]};
+        Shard* shard = new Shard();
+        shard->type = s["type"];
+        if (shard->type == "county") {
+            shard->counties = s["counties"].get<std::vector<std::string>>();
+        } else {
+            shard->start = s["start"];
+            shard->end = s["end"];
+        }
+        config.shard = shard;
     } else {
         config.shard = nullptr;
     }
