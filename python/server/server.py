@@ -143,11 +143,11 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         return response
 
     def process_query_on_shard(self, request):
-        """Process query on local shard"""
+        """Process query on local shard (supports both county and date-range sharding)"""
         chunks = []
         matched = 0
         current_chunk = parking_violation_query_pb2.Chunk(
-            request_id=request.request_id, 
+            request_id=request.request_id,
             is_last=False
         )
         print(f"[{self.config.node_id}] Processing shard: file={self.config.data_file}, shard={self.config.shard}, request_id={request.request_id}, chunk_size={request.chunk_size}")
@@ -156,19 +156,40 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
             "BX", "BRONX", "BK", "K", "BKLYN", "MN", "MAN", "NY",
             "QN", "Q", "QNS", "ST", "STATEN ISLAND", "SI"
         }
-        is_catchall = self.config.shard_counties == {"OTHER"}
+
+        # Determine shard type (default to date-based)
+        shard_type = self.config.shard.get('type', 'issue_date_range') if self.config.shard else 'issue_date_range'
+
+        # For county-based sharding
+        is_catchall = False
+        if shard_type == 'county_range':
+            is_catchall = self.config.shard_counties == {"OTHER"}
 
         try:
             with open(self.config.data_file, 'r', encoding='latin-1') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    # Bug fix: county may be None in CSV, guard with `or ''`
-                    county = (row.get('Violation County') or '').strip()
-                    if is_catchall:
-                        if county in known_counties:
+                    # Apply shard filtering based on shard type
+                    if shard_type == 'county_range':
+                        # County-based sharding
+                        county = (row.get('Violation County') or '').strip()
+                        if is_catchall:
+                            if county in known_counties:
+                                continue
+                        elif county not in self.config.shard_counties:
                             continue
-                    elif county not in self.config.shard_counties:
-                        continue
+                    else:
+                        # Date-based sharding (issue_date_range)
+                        issue_date_str = row.get('Issue Date', '') or ''
+                        if issue_date_str:
+                            try:
+                                shard_start = datetime.strptime(self.config.shard['start'], '%Y-%m-%d')
+                                shard_end = datetime.strptime(self.config.shard['end'], '%Y-%m-%d')
+                                issue_date = datetime.strptime(issue_date_str, '%m/%d/%Y')
+                                if not (shard_start <= issue_date <= shard_end):
+                                    continue
+                            except:
+                                continue
 
                     # Parse issue date once for any query type that needs it
                     issue_date = None
