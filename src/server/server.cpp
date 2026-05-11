@@ -150,7 +150,7 @@ private:
             std::cout << "[" << config_.node_id << "] Processing own shard (worker)" << std::endl;
             int chunk_size = request->chunk_size() > 0 ? request->chunk_size() : config_.chunk_size;
             auto chunks = process_query_on_shard(
-                data_file, config_.shard->start, config_.shard->end, request, chunk_size);
+                data_file, config_.shard, request, chunk_size);
             all_chunks.insert(all_chunks.end(), chunks.begin(), chunks.end());
             std::cout << "[" << config_.node_id << "] Own shard returned " << chunks.size() << " chunks" << std::endl;
         }
