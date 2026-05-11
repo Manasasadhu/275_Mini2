@@ -1,0 +1,154 @@
+syntax = "proto3";
+option optimize_for = SPEED;
+package parkingviolation;
+
+service ParkingViolationService {
+    rpc SubmitQuery(QueryRequest) returns (QueryResponse) {}
+    rpc FetchChunks(FetchChunksRequest) returns (FetchChunksResponse) {}
+    rpc ForwardQuery(ForwardRequest) returns (ForwardResponse) {}
+    rpc CancelQuery(CancelRequest) returns (CancelResponse) {}
+    rpc HealthCheck(HealthRequest) returns (HealthResponse) {}
+}
+
+message DateRange {
+    string start = 1;  // YYYY-MM-DD
+    string end = 2;    // YYYY-MM-DD
+}
+
+// Query 1: plate + violation code + date range
+message PlateViolationHistoryQuery {
+    string plate_id = 1;
+    int32 violation_code = 2;
+    DateRange date_range = 3;
+    string registration_state = 4;
+}
+
+message ViolationCodeDateRangeQuery {
+    int32 violation_code = 1;
+    DateRange date_range = 2;
+}
+
+// Query 2: county + precinct + vehicle year range + body type
+message PrecinctVehicleAnalysisQuery {
+    string county = 1;
+    int32 precinct = 2;
+    int32 vehicle_year_min = 3;
+    int32 vehicle_year_max = 4;
+    string body_type = 5;
+}
+
+// Query 3: unregistered flag + state + feet-from-curb threshold
+message UnregisteredVehicleLookupQuery {
+    bool unregistered = 1;
+    string state = 2;
+    int32 feet_from_curb_min = 3;
+}
+
+message QueryRequest {
+    string request_id = 1;
+    oneof query {
+        string plate_id = 2;
+        int32 violation_code = 3;
+        DateRange issue_date = 4;
+        PlateViolationHistoryQuery plate_violation_history = 6;
+        PrecinctVehicleAnalysisQuery precinct_vehicle_analysis = 7;
+        UnregisteredVehicleLookupQuery unregistered_vehicle_lookup = 8;
+        ViolationCodeDateRangeQuery violation_code_date_range = 9;
+    }
+    int32 chunk_size = 5;
+}
+
+message QueryResponse {
+    repeated Chunk chunks = 1;
+    int32 total_chunks = 2;
+    string request_id = 3;
+}
+
+message FetchChunksRequest {
+    string request_id = 1;
+    int32 offset = 2;
+    int32 limit = 3;
+}
+
+message FetchChunksResponse {
+    repeated Chunk chunks = 1;
+    int32 total_chunks = 2;
+    bool has_more = 3;
+}
+
+message Chunk {
+    string request_id = 1;
+    repeated ViolationRecord records = 2;
+    bool is_last = 3;
+}
+
+message ForwardRequest {
+    string request_id = 1;
+    string from_node = 2;
+    oneof query {
+        string plate_id = 3;
+        int32 violation_code = 4;
+        DateRange issue_date = 5;
+        PlateViolationHistoryQuery plate_violation_history = 7;
+        PrecinctVehicleAnalysisQuery precinct_vehicle_analysis = 8;
+        UnregisteredVehicleLookupQuery unregistered_vehicle_lookup = 9;
+        ViolationCodeDateRangeQuery violation_code_date_range = 10;
+    }
+    int32 chunk_size = 6;
+}
+
+message ForwardResponse {
+    repeated Chunk chunks = 1;
+}
+
+message CancelRequest {
+    string request_id = 1;
+}
+
+message CancelResponse {
+    bool success = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+    bool healthy = 1;
+}
+
+message ViolationRecord {
+    int64 summons_number = 1;
+    string plate_id = 2;
+    string registration_state = 3;
+    string plate_type = 4;
+    string issue_date = 5;
+    int32 violation_code = 6;
+    string vehicle_body_type = 7;
+    string vehicle_make = 8;
+    string issuing_agency = 9;
+    int32 street_code1 = 10;
+    int32 street_code2 = 11;
+    int32 street_code3 = 12;
+    string vehicle_expiration_date = 13;
+    string violation_location = 14;
+    int32 violation_precinct = 15;
+    int32 issuer_precinct = 16;
+    int32 issuer_code = 17;
+    string violation_description = 18;
+    int32 fine_amount = 19;
+    string penalty_amount = 20;
+    string interest_amount = 21;
+    string reduction_amount = 22;
+    string payment_amount = 23;
+    string amount_due = 24;
+    string precinct = 25;
+    string county = 26;
+    string issuing_agency_name = 27;
+    string violation_status = 28;
+    string summons_image = 29;
+    string violation_county = 30;
+    bool unregistered_vehicle = 31;
+    int32 vehicle_year = 32;
+    int32 feet_from_curb = 33;
+    string street_name = 34;
+    string vehicle_color = 35;
+}

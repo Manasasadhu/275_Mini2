@@ -1,0 +1,9 @@
+
+=== Executing All Queries (chunk_size=100) ===
+[q1] PlateViolationHistory(plate=JER1863, state=NY): 5 records in 380618 ms
+  Top 5 results:
+  [1] plate=JER1863 date=06/10/2022 code=67 state=NY county=NY
+  [2] plate=JER1863 date=06/30/2022 code=12 state=NY county=MN
+  [3] plate=JER1863 date=06/23/2022 code=7 state=NY county=MN
+  [4] plate=JER1863 date=06/30/2022 code=18 state=NY county=NY
+  [5] plate=JER1863 date=07/18/2022 code=5 state=NY county=MN
