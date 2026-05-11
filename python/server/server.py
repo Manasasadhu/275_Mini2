@@ -176,6 +176,38 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
         if shard_type == 'county_range':
             is_catchall = self.config.shard_counties == {"OTHER"}
 
+        # Parse shard dates ONCE before the loop
+        shard_start = shard_end = None
+        if shard_type == 'issue_date_range' and self.config.shard:
+            try:
+                shard_start = datetime.strptime(self.config.shard['start'], '%Y-%m-%d')
+                shard_end = datetime.strptime(self.config.shard['end'], '%Y-%m-%d')
+            except:
+                pass
+
+        # Pre-parse query dates based on query type
+        q_start = q_end = None
+        if request.HasField('issue_date'):
+            try:
+                q_start = datetime.strptime(request.issue_date.start, '%Y-%m-%d')
+                q_end = datetime.strptime(request.issue_date.end, '%Y-%m-%d')
+            except:
+                pass
+        elif request.HasField('plate_violation_history'):
+            try:
+                if request.plate_violation_history.date_range.start:
+                    q_start = datetime.strptime(request.plate_violation_history.date_range.start, '%Y-%m-%d')
+                    q_end = datetime.strptime(request.plate_violation_history.date_range.end, '%Y-%m-%d')
+            except:
+                pass
+        elif request.HasField('violation_code_date_range'):
+            try:
+                if request.violation_code_date_range.date_range.start:
+                    q_start = datetime.strptime(request.violation_code_date_range.date_range.start, '%Y-%m-%d')
+                    q_end = datetime.strptime(request.violation_code_date_range.date_range.end, '%Y-%m-%d')
+            except:
+                pass
+
         try:
             with open(self.config.data_file, 'r', encoding='latin-1') as f:
                 reader = csv.DictReader(f)
@@ -192,10 +224,8 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     else:
                         # Date-based sharding (issue_date_range)
                         issue_date_str = row.get('Issue Date', '') or ''
-                        if issue_date_str:
+                        if issue_date_str and shard_start and shard_end:
                             try:
-                                shard_start = datetime.strptime(self.config.shard['start'], '%Y-%m-%d')
-                                shard_end = datetime.strptime(self.config.shard['end'], '%Y-%m-%d')
                                 issue_date = datetime.strptime(issue_date_str, '%m/%d/%Y')
                                 if not (shard_start <= issue_date <= shard_end):
                                     continue
@@ -221,10 +251,8 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                         except:
                             continue
                     elif request.HasField('issue_date'):
-                        if issue_date is None:
+                        if issue_date is None or not q_start or not q_end:
                             continue
-                        q_start = datetime.strptime(request.issue_date.start, '%Y-%m-%d')
-                        q_end   = datetime.strptime(request.issue_date.end,   '%Y-%m-%d')
                         if not (q_start <= issue_date <= q_end):
                             continue
                     elif request.HasField('plate_violation_history'):
@@ -236,10 +264,8 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                         if q.registration_state and row.get('Registration State') != q.registration_state:
                             continue
                         if q.date_range.start:
-                            if issue_date is None:
+                            if issue_date is None or not q_start or not q_end:
                                 continue
-                            q_start = datetime.strptime(q.date_range.start, '%Y-%m-%d')
-                            q_end   = datetime.strptime(q.date_range.end,   '%Y-%m-%d')
                             if not (q_start <= issue_date <= q_end):
                                 continue
                     elif request.HasField('violation_code_date_range'):
@@ -250,10 +276,8 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                         except:
                             continue
                         if q.date_range.start:
-                            if issue_date is None:
+                            if issue_date is None or not q_start or not q_end:
                                 continue
-                            q_start = datetime.strptime(q.date_range.start, '%Y-%m-%d')
-                            q_end   = datetime.strptime(q.date_range.end,   '%Y-%m-%d')
                             if not (q_start <= issue_date <= q_end):
                                 continue
                     elif request.HasField('precinct_vehicle_analysis'):
