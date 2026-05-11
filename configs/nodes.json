@@ -1,7 +1,7 @@
 {
   "global": {
     "default_chunk_size": 500,
-    "shared_data_file": "/Users/Asha/Desktop/SJSU/secondsem/275/mini2/dataset/parking_violations_combined.csv",
+    "shared_data_file": "/Users/aravindreddy/Downloads/SJSU ClassWork/275 EAD/275_Mini2_Dataset/parking_violations_combined.csv",
     "date_field": "Issue Date"
   },
   "nodes": {
@@ -45,7 +45,7 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "county", "counties": ["BX", "BRONX"]}
+      "shard": {"type": "county_range", "counties": ["BX", "BRONX"]}
     },
     "D": {
       "node_id": "D",
@@ -59,7 +59,7 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "county", "counties": ["BK", "K", "BKLYN"]}
+      "shard": {"type": "county_range", "counties": ["BK", "K", "BKLYN"]}
     },
     "E": {
       "node_id": "E",
@@ -87,7 +87,7 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "county", "counties": ["MN", "MAN", "NY"]}
+      "shard": {"type": "county_range", "counties": ["MN", "MAN", "NY"]}
     },
     "G": {
       "node_id": "G",
@@ -101,7 +101,7 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "county", "counties": ["QN", "Q", "QNS"]}
+      "shard": {"type": "county_range", "counties": ["QN", "Q", "QNS"]}
     },
     "H": {
       "node_id": "H",
@@ -115,7 +115,7 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "county", "counties": ["ST", "STATEN ISLAND", "SI"]}
+      "shard": {"type": "county_range", "counties": ["ST", "STATEN ISLAND", "SI"]}
     },
     "I": {
       "node_id": "I",
@@ -129,7 +129,7 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "county", "counties": ["OTHER"]}
+      "shard": {"type": "county_range", "counties": ["OTHER"]}
     }
   }
 }
