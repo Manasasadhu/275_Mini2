@@ -7,6 +7,7 @@ import csv
 from datetime import datetime
 import argparse
 import sys
+import time
 
 class Config:
     def __init__(self, config_file, node_id):
@@ -78,7 +79,7 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     from_node=self.config.node_id,
                     chunk_size=request.chunk_size
                 )
-                
+
                 # Copy the query type
                 if request.HasField('plate_id'):
                     fwd_request.plate_id = request.plate_id
@@ -94,13 +95,18 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     fwd_request.precinct_vehicle_analysis.CopyFrom(request.precinct_vehicle_analysis)
                 elif request.HasField('unregistered_vehicle_lookup'):
                     fwd_request.unregistered_vehicle_lookup.CopyFrom(request.unregistered_vehicle_lookup)
-                
+
+                rpc_start = time.time()
                 fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(fwd_request, timeout=120)
+                rpc_end = time.time()
+                rpc_ms = int((rpc_end - rpc_start) * 1000)
                 for chunk in fwd_response.chunks:
                     response.chunks.append(chunk)
-                print(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
+                print(f"[{self.config.node_id}] Latency to {neighbor}: {rpc_ms} ms, chunks={len(fwd_response.chunks)}")
             except Exception as e:
-                print(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
+                rpc_end = time.time()
+                rpc_ms = int((rpc_end - rpc_start) * 1000)
+                print(f"[{self.config.node_id}] Error forwarding to {neighbor} (latency={rpc_ms} ms): {e}")
         
         return response
 
@@ -127,11 +133,16 @@ class ParkingService(parking_violation_query_pb2_grpc.ParkingViolationServiceSer
                     print(f"[{self.config.node_id}] Skipping {neighbor} (query came from here)")
                     continue
                 try:
+                    rpc_start = time.time()
                     fwd_response = self.neighbor_stubs[neighbor].ForwardQuery(request, timeout=600)
+                    rpc_end = time.time()
+                    rpc_ms = int((rpc_end - rpc_start) * 1000)
                     response.chunks.extend(fwd_response.chunks)
-                    print(f"[{self.config.node_id}] Got {len(fwd_response.chunks)} chunks from {neighbor}")
+                    print(f"[{self.config.node_id}] Latency to {neighbor}: {rpc_ms} ms, chunks={len(fwd_response.chunks)}")
                 except Exception as e:
-                    print(f"[{self.config.node_id}] Error forwarding to {neighbor}: {e}")
+                    rpc_end = time.time()
+                    rpc_ms = int((rpc_end - rpc_start) * 1000)
+                    print(f"[{self.config.node_id}] Error forwarding to {neighbor} (latency={rpc_ms} ms): {e}")
 
         # Process own shard if this node is a worker
         if self.config.shard:

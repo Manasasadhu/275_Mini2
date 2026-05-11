@@ -171,14 +171,17 @@ private:
                     grpc::ClientContext ctx;
                     ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(600));
                     parkingviolation::ForwardResponse fwd_response;
+                    auto rpc_start = std::chrono::high_resolution_clock::now();
                     grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, *request, &fwd_response);
+                    auto rpc_end = std::chrono::high_resolution_clock::now();
+                    auto rpc_ms = std::chrono::duration_cast<std::chrono::milliseconds>(rpc_end - rpc_start).count();
                     if (status.ok()) {
                         for (const auto& chunk : fwd_response.chunks()) chunks.push_back(chunk);
-                        std::cout << "[" << config_.node_id << "] Collected " << fwd_response.chunks_size()
-                                  << " chunks from " << neighbor << std::endl;
+                        std::cout << "[" << config_.node_id << "] Latency to " << neighbor << ": " << rpc_ms
+                                  << " ms, chunks=" << fwd_response.chunks_size() << std::endl;
                     } else {
                         std::cerr << "[" << config_.node_id << "] Error forwarding to " << neighbor
-                                  << ": " << status.error_message() << std::endl;
+                                  << " (latency=" << rpc_ms << " ms): " << status.error_message() << std::endl;
                     }
                     return chunks;
                 }));
