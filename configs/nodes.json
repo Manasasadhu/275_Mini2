@@ -1,13 +1,13 @@
 {
   "global": {
     "default_chunk_size": 500,
-    "shared_data_file": "combined_parking_violations.csv",
+    "shared_data_file": "/Users/Asha/Desktop/SJSU/secondsem/275/mini2/dataset/parking_violations_combined.csv",
     "date_field": "Issue Date"
   },
   "nodes": {
     "A": {
       "node_id": "A",
-      "host": "10.0.0.200",
+      "host": "localhost",
       "port": 50051,
       "neighbors": ["B", "G", "H", "I"],
       "language": "cpp",
@@ -21,7 +21,7 @@
     },
     "B": {
       "node_id": "B",
-      "host": "10.0.0.200",
+      "host": "localhost",
       "port": 50052,
       "neighbors": ["A", "C", "D", "E"],
       "language": "cpp",
@@ -35,7 +35,7 @@
     },
     "C": {
       "node_id": "C",
-      "host": "10.0.0.200",
+      "host": "localhost",
       "port": 50053,
       "neighbors": ["B"],
       "language": "cpp",
@@ -45,11 +45,11 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "issue_date_range", "start": "2018-07-01", "end": "2019-06-30"}
+      "shard": {"type": "county", "counties": ["BX", "BRONX"]}
     },
     "D": {
       "node_id": "D",
-      "host": "10.0.0.200",
+      "host": "localhost",
       "port": 50054,
       "neighbors": ["B", "E"],
       "language": "cpp",
@@ -59,11 +59,11 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "issue_date_range", "start": "2022-07-01", "end": "2022-12-31"}
+      "shard": {"type": "county", "counties": ["BK", "K", "BKLYN"]}
     },
     "E": {
       "node_id": "E",
-      "host": "10.0.0.200",
+      "host": "localhost",
       "port": 50055,
       "neighbors": ["B", "D", "F", "G"],
       "language": "cpp",
@@ -77,7 +77,7 @@
     },
     "F": {
       "node_id": "F",
-      "host": "10.0.0.154",
+      "host": "localhost",
       "port": 50056,
       "neighbors": ["E"],
       "language": "python",
@@ -87,11 +87,11 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "issue_date_range", "start": "2023-07-01", "end": "2024-06-30"}
+      "shard": {"type": "county", "counties": ["MN", "MAN", "NY"]}
     },
     "G": {
       "node_id": "G",
-      "host": "10.0.0.154",
+      "host": "localhost",
       "port": 50057,
       "neighbors": ["A", "E"],
       "language": "cpp",
@@ -101,11 +101,11 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "issue_date_range", "start": "2024-07-01", "end": "2025-06-30"}
+      "shard": {"type": "county", "counties": ["QN", "Q", "QNS"]}
     },
     "H": {
       "node_id": "H",
-      "host": "10.0.0.154",
+      "host": "localhost",
       "port": 50058,
       "neighbors": ["A"],
       "language": "python",
@@ -115,11 +115,11 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "issue_date_range", "start": "2025-07-01", "end": "2026-06-30"}
+      "shard": {"type": "county", "counties": ["ST", "STATEN ISLAND", "SI"]}
     },
     "I": {
       "node_id": "I",
-      "host": "10.0.0.154",
+      "host": "localhost",
       "port": 50059,
       "neighbors": ["A"],
       "language": "python",
@@ -129,7 +129,7 @@
       "client_facing": false,
       "chunk_size": 100,
       "data_file": null,
-      "shard": {"type": "issue_date_range", "start": "2023-01-01", "end": "2023-06-30"}
+      "shard": {"type": "county", "counties": ["OTHER"]}
     }
   }
 }

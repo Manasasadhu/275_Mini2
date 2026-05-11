@@ -3,14 +3,9 @@
 #include <string>
 #include <chrono>
 #include <future>
-#include <thread>
 #include <mutex>
 #include <unordered_set>
-#include <unordered_map>
-#include <list>
 #include <vector>
-#include <iomanip>
-#include <ctime>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
@@ -19,52 +14,17 @@
 #include "common/config.hpp"
 #include "common/sharding.hpp"
 
-static const size_t MAX_CACHE_ENTRIES = 64;
-
-static std::string build_cache_key(const parkingviolation::ForwardRequest* req) {
-    std::string key;
-    if (req->has_plate_id()) {
-        key = "plate:" + req->plate_id();
-    } else if (req->has_violation_code()) {
-        key = "vc:" + std::to_string(req->violation_code());
-    } else if (req->has_issue_date()) {
-        key = "date:" + req->issue_date().start() + "~" + req->issue_date().end();
-    } else if (req->has_plate_violation_history()) {
-        const auto& q = req->plate_violation_history();
-        key = "pvh:" + q.plate_id() + ":" + std::to_string(q.violation_code()) + ":" +
-              q.date_range().start() + "~" + q.date_range().end() + ":" + q.registration_state();
-    } else if (req->has_violation_code_date_range()) {
-        const auto& q = req->violation_code_date_range();
-        key = "vcdr:" + std::to_string(q.violation_code()) + ":" +
-              q.date_range().start() + "~" + q.date_range().end();
-    } else if (req->has_precinct_vehicle_analysis()) {
-        const auto& q = req->precinct_vehicle_analysis();
-        key = "pva:" + q.county() + ":" + std::to_string(q.precinct()) + ":" +
-              std::to_string(q.vehicle_year_min()) + "~" + std::to_string(q.vehicle_year_max()) + ":" + q.body_type();
-    } else if (req->has_unregistered_vehicle_lookup()) {
-        const auto& q = req->unregistered_vehicle_lookup();
-        key = "uvl:" + std::string(q.unregistered() ? "1" : "0") + ":" + q.state() + ":" +
-              std::to_string(q.feet_from_curb_min());
-    }
-    key += "|cs:" + std::to_string(req->chunk_size());
-    return key;
-}
-
 class ParkingServiceImpl final : public parkingviolation::ParkingViolationService::Service {
 public:
     ParkingServiceImpl(const NodeConfig& config) : config_(config) {
         for (const auto& neighbor : config_.neighbors) {
-            std::string neighbor_host = config_.neighbor_hosts.count(neighbor)
-                ? config_.neighbor_hosts.at(neighbor) : "localhost";
-            int neighbor_port = config_.neighbor_ports.count(neighbor)
-                ? config_.neighbor_ports.at(neighbor) : 0;
-            std::string neighbor_addr = neighbor_host + ":" + std::to_string(neighbor_port);
+            std::string neighbor_addr = "localhost:" + std::to_string(get_neighbor_port(neighbor));
             grpc::ChannelArguments args;
             args.SetMaxReceiveMessageSize(-1);
             args.SetMaxSendMessageSize(-1);
             auto channel = grpc::CreateCustomChannel(neighbor_addr, grpc::InsecureChannelCredentials(), args);
             neighbor_stubs_[neighbor] = parkingviolation::ParkingViolationService::NewStub(channel);
-            std::cout << "[" << timestamp() << "] Initialized neighbor " << neighbor << " at " << neighbor_addr << std::endl;
+            std::cout << "Initialized neighbor " << neighbor << " at " << neighbor_addr << std::endl;
         }
     }
 
@@ -72,45 +32,14 @@ private:
     NodeConfig config_;
     std::mutex dedup_mutex_;
     std::unordered_set<std::string> processed_requests_;
-    std::mutex cancel_mutex_;
-    std::unordered_set<std::string> cancelled_requests_;
     std::map<std::string, std::unique_ptr<parkingviolation::ParkingViolationService::Stub>> neighbor_stubs_;
 
-    // LRU cache: key -> chunks
-    std::mutex cache_mutex_;
-    std::list<std::string> cache_order_;
-    std::unordered_map<std::string, std::pair<std::vector<parkingviolation::Chunk>,
-                       std::list<std::string>::iterator>> cache_;
-
-    // Result store for client-side chunk retrieval (gateway only)
-    std::mutex results_mutex_;
-    std::unordered_map<std::string, std::vector<parkingviolation::Chunk>> result_store_;
-
-    void cache_put(const std::string& key, const std::vector<parkingviolation::Chunk>& chunks) {
-        std::lock_guard<std::mutex> lock(cache_mutex_);
-        auto it = cache_.find(key);
-        if (it != cache_.end()) {
-            cache_order_.erase(it->second.second);
-            cache_.erase(it);
-        }
-        if (cache_.size() >= MAX_CACHE_ENTRIES) {
-            auto oldest = cache_order_.back();
-            cache_order_.pop_back();
-            cache_.erase(oldest);
-        }
-        cache_order_.push_front(key);
-        cache_[key] = {chunks, cache_order_.begin()};
-    }
-
-    bool cache_get(const std::string& key, std::vector<parkingviolation::Chunk>& out) {
-        std::lock_guard<std::mutex> lock(cache_mutex_);
-        auto it = cache_.find(key);
-        if (it == cache_.end()) return false;
-        cache_order_.erase(it->second.second);
-        cache_order_.push_front(key);
-        it->second.second = cache_order_.begin();
-        out = it->second.first;
-        return true;
+    int get_neighbor_port(const std::string& neighbor_id) {
+        std::map<std::string, int> port_map = {
+            {"A", 50051}, {"B", 50052}, {"C", 50053}, {"D", 50054}, {"E", 50055},
+            {"F", 50056}, {"G", 50057}, {"H", 50058}, {"I", 50059}
+        };
+        return port_map[neighbor_id];
     }
 
     grpc::Status SubmitQuery(grpc::ServerContext* context,
@@ -130,11 +59,10 @@ private:
         else if (request->has_precinct_vehicle_analysis()) query_type = "precinct_vehicle_analysis";
         else if (request->has_unregistered_vehicle_lookup()) query_type = "unregistered_vehicle_lookup";
 
-        auto gateway_start = std::chrono::high_resolution_clock::now();
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway received query: request_id=" << req_id
+        std::cout << "[" << config_.node_id << "] Gateway received query: request_id=" << req_id
                   << ", type=" << query_type << ", chunk_size=" << request->chunk_size() << std::endl;
 
-        // Build a temporary ForwardRequest to compute cache key
+        // Convert QueryRequest to ForwardRequest
         parkingviolation::ForwardRequest forward_req;
         forward_req.set_request_id(req_id);
         forward_req.set_from_node(config_.node_id);
@@ -156,24 +84,6 @@ private:
         }
         forward_req.set_chunk_size(request->chunk_size());
 
-        // Check gateway-level cache
-        std::string cache_key = build_cache_key(&forward_req);
-        std::vector<parkingviolation::Chunk> cached_chunks;
-        if (cache_get(cache_key, cached_chunks)) {
-            auto cache_ms = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::high_resolution_clock::now() - gateway_start).count();
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT at gateway for key=" << cache_key
-                      << " (lookup_time=" << cache_ms << " us)" << std::endl;
-            {
-                std::lock_guard<std::mutex> lock(results_mutex_);
-                result_store_[req_id] = cached_chunks;
-            }
-            response->set_total_chunks(cached_chunks.size());
-            response->set_request_id(req_id);
-            return grpc::Status::OK;
-        }
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE MISS at gateway, forwarding query" << std::endl;
-
         // Forward to all neighbors in parallel
         using ChunkVec = std::vector<parkingviolation::Chunk>;
         std::vector<std::future<ChunkVec>> futures;
@@ -182,73 +92,26 @@ private:
             futures.push_back(std::async(std::launch::async, [this, neighbor, &forward_req]() {
                 ChunkVec chunks;
                 grpc::ClientContext ctx;
-                ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(1800));
+                ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(600));
                 parkingviolation::ForwardResponse fwd_response;
-                auto fwd_start = std::chrono::high_resolution_clock::now();
                 grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, forward_req, &fwd_response);
-                auto fwd_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::high_resolution_clock::now() - fwd_start).count();
                 if (status.ok()) {
                     for (const auto& chunk : fwd_response.chunks()) chunks.push_back(chunk);
-                    std::cout << "[" << timestamp() << "][" << config_.node_id << "] Received " << fwd_response.chunks_size()
-                              << " chunks from " << neighbor << " (rpc_time=" << fwd_ms << " ms)" << std::endl;
+                    std::cout << "[" << config_.node_id << "] Received " << fwd_response.chunks_size()
+                              << " chunks from " << neighbor << std::endl;
                 } else {
-                    std::cerr << "[" << timestamp() << "][" << config_.node_id << "] Error forwarding to " << neighbor
-                              << ": " << status.error_message() << " (" << fwd_ms << " ms)" << std::endl;
+                    std::cerr << "[" << config_.node_id << "] Error forwarding to " << neighbor
+                              << ": " << status.error_message() << std::endl;
                 }
                 return chunks;
             }));
         }
 
-        std::vector<parkingviolation::Chunk> all_result_chunks;
         for (auto& f : futures) {
-            for (const auto& chunk : f.get()) all_result_chunks.push_back(chunk);
+            for (const auto& chunk : f.get()) response->add_chunks()->CopyFrom(chunk);
         }
-
-        // Store in gateway cache and result store for client pull
-        cache_put(cache_key, all_result_chunks);
-        {
-            std::lock_guard<std::mutex> lock(results_mutex_);
-            result_store_[req_id] = all_result_chunks;
-        }
-
-        auto gateway_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - gateway_start).count();
-        response->set_total_chunks(all_result_chunks.size());
-        response->set_request_id(req_id);
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Gateway stored " << all_result_chunks.size()
-                  << " chunks for client pull (request_id=" << req_id << ", total_time=" << gateway_ms << " ms)" << std::endl;
-        return grpc::Status::OK;
-    }
-
-    grpc::Status FetchChunks(grpc::ServerContext* context,
-                             const parkingviolation::FetchChunksRequest* request,
-                             parkingviolation::FetchChunksResponse* response) override {
-        std::string req_id = request->request_id();
-        int offset = request->offset();
-        int limit = request->limit();
-
-        std::lock_guard<std::mutex> lock(results_mutex_);
-        auto it = result_store_.find(req_id);
-        if (it == result_store_.end()) {
-            return grpc::Status(grpc::StatusCode::NOT_FOUND, "No results for request_id=" + req_id);
-        }
-
-        const auto& chunks = it->second;
-        int total = chunks.size();
-        response->set_total_chunks(total);
-
-        int end = std::min(offset + limit, total);
-        for (int i = offset; i < end; i++) {
-            response->add_chunks()->CopyFrom(chunks[i]);
-        }
-        response->set_has_more(end < total);
-
-        if (offset == 0 || end >= total) {
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] FetchChunks: request_id=" << req_id
-                      << " offset=" << offset << " limit=" << limit << " returned=" << (end - offset)
-                      << " has_more=" << (end < total) << " total_chunks=" << total << std::endl;
-        }
+        std::cout << "[" << config_.node_id << "] Gateway response contains " << response->chunks_size()
+                  << " total chunks" << std::endl;
         return grpc::Status::OK;
     }
 
@@ -266,52 +129,30 @@ private:
         else if (request->has_precinct_vehicle_analysis()) query_type = "precinct_vehicle_analysis";
         else if (request->has_unregistered_vehicle_lookup()) query_type = "unregistered_vehicle_lookup";
 
-        if (is_cancelled(req_id)) {
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] Query " << req_id << " is cancelled, aborting" << std::endl;
-            return grpc::Status(grpc::StatusCode::CANCELLED, "Request cancelled");
-        }
-
         {
             std::lock_guard<std::mutex> lock(dedup_mutex_);
             if (processed_requests_.count(req_id)) {
-                std::cout << "[" << timestamp() << "][" << config_.node_id << "] Query " << req_id << " already processed, skipping" << std::endl;
+                std::cout << "[" << config_.node_id << "] Query " << req_id << " already processed, skipping" << std::endl;
                 return grpc::Status::OK;
             }
             processed_requests_.insert(req_id);
         }
 
-        auto node_start = std::chrono::high_resolution_clock::now();
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] ForwardQuery received: request_id=" << req_id
+        std::cout << "[" << config_.node_id << "] ForwardQuery received: request_id=" << req_id
                   << ", from_node=" << from_node << ", type=" << query_type
                   << ", neighbors=" << config_.neighbors.size() << std::endl;
-
-        // Check node-level cache
-        std::string cache_key = build_cache_key(request);
-        std::vector<parkingviolation::Chunk> cached_chunks;
-        if (cache_get(cache_key, cached_chunks)) {
-            auto cache_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::high_resolution_clock::now() - node_start).count();
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] CACHE HIT for key=" << cache_key
-                      << " (lookup_time=" << cache_us << " us)" << std::endl;
-            for (const auto& chunk : cached_chunks) response->add_chunks()->CopyFrom(chunk);
-            return grpc::Status::OK;
-        }
 
         std::string data_file = config_.data_file.empty() ? config_.global_data_file : config_.data_file;
 
         // Step 1: Process own shard
         std::vector<parkingviolation::Chunk> all_chunks;
         if (config_.shard && !data_file.empty()) {
-            auto shard_start = std::chrono::high_resolution_clock::now();
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] Processing own shard (worker)" << std::endl;
+            std::cout << "[" << config_.node_id << "] Processing own shard (worker)" << std::endl;
             int chunk_size = request->chunk_size() > 0 ? request->chunk_size() : config_.chunk_size;
             auto chunks = process_query_on_shard(
-                data_file, config_.shard->start, config_.shard->end, request, chunk_size);
-            auto shard_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - shard_start).count();
+                data_file, config_.shard, request, chunk_size);
             all_chunks.insert(all_chunks.end(), chunks.begin(), chunks.end());
-            std::cout << "[" << timestamp() << "][" << config_.node_id << "] Own shard returned " << chunks.size()
-                      << " chunks (scan_time=" << shard_ms << " ms)" << std::endl;
+            std::cout << "[" << config_.node_id << "] Own shard returned " << chunks.size() << " chunks" << std::endl;
         }
 
         // Step 2: Forward to neighbors in parallel (relay/gateway only)
@@ -319,32 +160,25 @@ private:
             using ChunkVec = std::vector<parkingviolation::Chunk>;
             std::vector<std::future<ChunkVec>> futures;
 
-            // Update from_node to this node so downstream neighbors skip us
-            parkingviolation::ForwardRequest outgoing_req(*request);
-            outgoing_req.set_from_node(config_.node_id);
-
             for (const auto& neighbor : config_.neighbors) {
                 if (neighbor == from_node) {
-                    std::cout << "[" << timestamp() << "][" << config_.node_id << "] Skipping " << neighbor << " (query came from here)" << std::endl;
+                    std::cout << "[" << config_.node_id << "] Skipping " << neighbor << " (query came from here)" << std::endl;
                     continue;
                 }
-                std::cout << "[" << timestamp() << "][" << config_.node_id << "] Forwarding to neighbor " << neighbor << std::endl;
-                futures.push_back(std::async(std::launch::async, [this, neighbor, &outgoing_req]() {
+                std::cout << "[" << config_.node_id << "] Forwarding to neighbor " << neighbor << std::endl;
+                futures.push_back(std::async(std::launch::async, [this, neighbor, request]() {
                     ChunkVec chunks;
                     grpc::ClientContext ctx;
-                    ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(1800));
+                    ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(600));
                     parkingviolation::ForwardResponse fwd_response;
-                    auto fwd_start = std::chrono::high_resolution_clock::now();
-                    grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, outgoing_req, &fwd_response);
-                    auto fwd_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::high_resolution_clock::now() - fwd_start).count();
+                    grpc::Status status = neighbor_stubs_[neighbor]->ForwardQuery(&ctx, *request, &fwd_response);
                     if (status.ok()) {
                         for (const auto& chunk : fwd_response.chunks()) chunks.push_back(chunk);
-                        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Collected " << fwd_response.chunks_size()
-                                  << " chunks from " << neighbor << " (rpc_time=" << fwd_ms << " ms)" << std::endl;
+                        std::cout << "[" << config_.node_id << "] Collected " << fwd_response.chunks_size()
+                                  << " chunks from " << neighbor << std::endl;
                     } else {
-                        std::cerr << "[" << timestamp() << "][" << config_.node_id << "] Error forwarding to " << neighbor
-                                  << ": " << status.error_message() << " (" << fwd_ms << " ms)" << std::endl;
+                        std::cerr << "[" << config_.node_id << "] Error forwarding to " << neighbor
+                                  << ": " << status.error_message() << std::endl;
                     }
                     return chunks;
                 }));
@@ -356,60 +190,20 @@ private:
             }
         }
 
-        // Store in cache
-        cache_put(cache_key, all_chunks);
-
-        auto node_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - node_start).count();
-
         // Step 3: Return aggregated results
         for (const auto& chunk : all_chunks) {
             response->add_chunks()->CopyFrom(chunk);
         }
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] Returning " << all_chunks.size()
-                  << " total chunks for request " << req_id << " (node_time=" << node_ms << " ms)" << std::endl;
+        std::cout << "[" << config_.node_id << "] Returning " << all_chunks.size()
+                  << " total chunks for request " << req_id << std::endl;
         return grpc::Status::OK;
     }
 
     grpc::Status CancelQuery(grpc::ServerContext* context,
                              const parkingviolation::CancelRequest* request,
                              parkingviolation::CancelResponse* response) override {
-        std::string req_id = request->request_id();
-        {
-            std::lock_guard<std::mutex> lock(cancel_mutex_);
-            if (cancelled_requests_.count(req_id)) {
-                response->set_success(true);
-                return grpc::Status::OK;
-            }
-            cancelled_requests_.insert(req_id);
-        }
-        std::cout << "[" << timestamp() << "][" << config_.node_id << "] CancelQuery: cancelling request " << req_id << std::endl;
-
-        // Remove from result store if present
-        {
-            std::lock_guard<std::mutex> lock(results_mutex_);
-            result_store_.erase(req_id);
-        }
-
-        // Propagate cancellation to all neighbors
-        for (const auto& neighbor : config_.neighbors) {
-            std::thread([this, neighbor, req_id]() {
-                grpc::ClientContext ctx;
-                ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
-                parkingviolation::CancelRequest cancel_req;
-                cancel_req.set_request_id(req_id);
-                parkingviolation::CancelResponse cancel_resp;
-                neighbor_stubs_[neighbor]->CancelQuery(&ctx, cancel_req, &cancel_resp);
-            }).detach();
-        }
-
         response->set_success(true);
         return grpc::Status::OK;
-    }
-
-    bool is_cancelled(const std::string& req_id) {
-        std::lock_guard<std::mutex> lock(cancel_mutex_);
-        return cancelled_requests_.count(req_id) > 0;
     }
 
     grpc::Status HealthCheck(grpc::ServerContext* context,
@@ -421,7 +215,7 @@ private:
 };
 
 void RunServer(const NodeConfig& config) {
-    std::string server_address = config.listen_host + ":" + std::to_string(config.port);
+    std::string server_address = config.host + ":" + std::to_string(config.port);
     ParkingServiceImpl service(config);
 
     grpc::ServerBuilder builder;
@@ -431,7 +225,7 @@ void RunServer(const NodeConfig& config) {
     builder.RegisterService(&service);
 
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    std::cout << "[" << timestamp() << "] Server listening on " << server_address << std::endl;
+    std::cout << "Server listening on " << server_address << std::endl;
     server->Wait();
 }
 
